@@ -4,3 +4,4 @@
 - 02: compare electron vs tauri for the studio shell
 - 02: list core screens: editor, palette, deploy, settings
 - 03: rough wireframe of the dark dashboard layout
+- 06: read rosbridge and roslibjs docs, note reconnect strategy
