@@ -7,3 +7,4 @@
 - 06: read rosbridge and roslibjs docs, note reconnect strategy
 - 06: decide on react + vite for the renderer
 - 06: first pass at the node palette taxonomy
+- 07: block diagram of the backend bridge process
