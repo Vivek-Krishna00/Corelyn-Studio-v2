@@ -8,3 +8,4 @@
 - 06: decide on react + vite for the renderer
 - 06: first pass at the node palette taxonomy
 - 07: block diagram of the backend bridge process
+- 08: shortlist drag-and-drop approaches for the canvas
