@@ -12,3 +12,4 @@
 - 08: auth flow notes: login, signup, session
 - 09: dark theme color tokens draft
 - 11: typography and spacing pass on the wireframes
+- 11: minimap and zoom pill placement notes
