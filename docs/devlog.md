@@ -11,3 +11,4 @@
 - 08: shortlist drag-and-drop approaches for the canvas
 - 08: auth flow notes: login, signup, session
 - 09: dark theme color tokens draft
+- 11: typography and spacing pass on the wireframes
