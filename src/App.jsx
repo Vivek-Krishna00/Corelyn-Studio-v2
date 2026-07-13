@@ -16,6 +16,9 @@ const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:8000";
 
 const NODE_W = 236;
 const NODE_H = 72;
+const MIN_ZOOM = 0.2;
+const MAX_ZOOM = 2.0;
+const MARQUEE_THRESHOLD = 6;
 
 const NODE_DEFS = [
   // ── FLOW ──
@@ -86,6 +89,36 @@ function buildDefaultParams(def) {
 
 function uid() { return Math.random().toString(36).slice(2, 9); }
 function getNodeDef(type) { return NODE_DEFS.find(n => n.type === type); }
+function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
+
+function normalizeRect(start, current) {
+  const x = Math.min(start.x, current.x);
+  const y = Math.min(start.y, current.y);
+  return {
+    x,
+    y,
+    width: Math.abs(current.x - start.x),
+    height: Math.abs(current.y - start.y),
+  };
+}
+
+function rectsIntersect(a, b) {
+  return a.x < b.x + b.width &&
+    a.x + a.width > b.x &&
+    a.y < b.y + b.height &&
+    a.y + a.height > b.y;
+}
+
+function getTouchMetrics(touches) {
+  const [first, second] = touches;
+  const center = {
+    x: (first.clientX + second.clientX) / 2,
+    y: (first.clientY + second.clientY) / 2,
+  };
+  const dx = second.clientX - first.clientX;
+  const dy = second.clientY - first.clientY;
+  return { center, distance: Math.max(1, Math.hypot(dx, dy)) };
+}
 
 function portY(idx, total, h) {
   const spacing = h / (total + 1);
@@ -110,6 +143,13 @@ function flowReducer(state, action) {
     case "ADD_NODE": return { ...state, nodes: [...state.nodes, action.node] };
     case "MOVE_NODE": return { ...state, nodes: state.nodes.map(n => n.id === action.id ? { ...n, x: action.x, y: action.y } : n) };
     case "DELETE_NODE": return { nodes: state.nodes.filter(n => n.id !== action.id), connections: state.connections.filter(c => c.fromNode !== action.id && c.toNode !== action.id) };
+    case "DELETE_NODES": {
+      const ids = new Set(action.ids);
+      return {
+        nodes: state.nodes.filter(n => !ids.has(n.id)),
+        connections: state.connections.filter(c => !ids.has(c.fromNode) && !ids.has(c.toNode)),
+      };
+    }
     case "ADD_CONN": return { ...state, connections: [...state.connections, action.conn] };
     case "DELETE_CONN": return { ...state, connections: state.connections.filter(c => c.id !== action.id) };
     case "UPDATE_PARAM": return { ...state, nodes: state.nodes.map(n => n.id === action.nodeId ? { ...n, params: { ...n.params, [action.key]: action.value } } : n) };
@@ -165,6 +205,7 @@ function useAMRSim(isRunning) {
 export default function RobotHMI() {
   const [flow, dispatch] = useReducer(flowReducer, { nodes: [], connections: [] });
   const [selected, setSelected] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]);
   const [rightTab, setRightTab] = useState("props");
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -194,10 +235,12 @@ export default function RobotHMI() {
   const [backendOnline, setBackendOnline] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState(DEFAULT_EXPANDED_CATEGORIES);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+  const [marquee, setMarquee] = useState(null);
 
   const canvasRef = useRef(null);
   const importInputRef = useRef(null);
   const tapRef = useRef({ startX: 0, startY: 0, startTime: 0, nodeId: null });
+  const touchGestureRef = useRef(null);
   const { toasts, add: toast } = useToasts();
   const [amr, setAmr] = useAMRSim(missionRunning);
 
@@ -239,6 +282,7 @@ export default function RobotHMI() {
 
     dispatch({ type: "ADD_NODE", node: newNode });
     setSelected(newNode.id);
+    setSelectedIds([newNode.id]);
     setRightTab("props");
     addLog(`Node added: ${def.label}`, "info");
     toast(`"${def.label}" added to canvas`, "success");
@@ -266,18 +310,47 @@ export default function RobotHMI() {
   const onMouseMove = useCallback((e) => {
     const pos = toCanvas(e.clientX, e.clientY);
     setMousePos(pos);
+    if (marquee) {
+      setMarquee(current => current ? { ...current, current: pos, currentClient: { x: e.clientX, y: e.clientY } } : null);
+      return;
+    }
     if (draggingNode) {
       dispatch({ type: "MOVE_NODE", id: draggingNode.id, x: pos.x - draggingNode.ox, y: pos.y - draggingNode.oy });
     }
     if (isPanning) {
       setPan({ x: e.clientX - panStart.x, y: e.clientY - panStart.y });
     }
-  }, [draggingNode, isPanning, panStart, toCanvas]);
+  }, [draggingNode, isPanning, marquee, panStart, toCanvas]);
 
   const onMouseUp = useCallback(() => {
+    if (marquee) {
+      const dx = marquee.currentClient.x - marquee.startClient.x;
+      const dy = marquee.currentClient.y - marquee.startClient.y;
+      const movedEnough = Math.hypot(dx, dy) >= MARQUEE_THRESHOLD;
+      if (movedEnough) {
+        const rect = normalizeRect(marquee.start, marquee.current);
+        const ids = flow.nodes
+          .filter(node => rectsIntersect(rect, { x: node.x, y: node.y, width: NODE_W, height: NODE_H }))
+          .map(node => node.id);
+        setSelectedIds(ids);
+        setSelected(ids[0] || null);
+        setSelectedConn(null);
+        if (ids.length === 1) {
+          if (isMobile) setMobileRightOpen(true); else setRightPanelOpen(true);
+        } else {
+          setMobileRightOpen(false);
+          setRightPanelOpen(false);
+        }
+      } else {
+        setSelected(null);
+        setSelectedIds([]);
+        setSelectedConn(null);
+      }
+      setMarquee(null);
+    }
     setDraggingNode(null);
     setIsPanning(false);
-  }, []);
+  }, [flow.nodes, isMobile, marquee]);
 
   const onCanvasMouseDown = useCallback((e) => {
     if (e.button === 1 || e.button === 0 && (e.altKey || spaceHeld)) {
@@ -287,29 +360,83 @@ export default function RobotHMI() {
       return;
     }
     if (connecting) { setConnecting(null); return; }
-    if (e.target === canvasRef.current || e.target.classList.contains("canvas-bg")) {
-      setSelected(null);
+    if (e.target === canvasRef.current || e.target.classList.contains("canvas-bg") || e.target.classList.contains("canvas-transform-layer")) {
       setSelectedConn(null);
+      if (e.button === 0) {
+        const start = toCanvas(e.clientX, e.clientY);
+        setMarquee({
+          start,
+          current: start,
+          startClient: { x: e.clientX, y: e.clientY },
+          currentClient: { x: e.clientX, y: e.clientY },
+        });
+      } else {
+        setSelected(null);
+        setSelectedIds([]);
+      }
       if (connectionState.isSelectingTarget) {
         setConnectionState({ sourceNodeId: null, isSelectingTarget: false });
       }
     }
-  }, [pan, connecting, connectionState.isSelectingTarget, spaceHeld]);
+  }, [pan, connecting, connectionState.isSelectingTarget, spaceHeld, toCanvas]);
 
   const onWheel = useCallback((e) => {
     e.preventDefault();
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const cx = rect.width / 2;
-    const cy = rect.height / 2;
-    const factor = e.deltaY > 0 ? 0.92 : 1.08;
-    const newZoom = Math.min(2.0, Math.max(0.2, zoom * factor));
+    if (e.ctrlKey) {
+      const factor = clamp(Math.exp(-e.deltaY * 0.01), 0.82, 1.18);
+      const newZoom = clamp(zoom * factor, MIN_ZOOM, MAX_ZOOM);
+      const worldPoint = toCanvas(e.clientX, e.clientY);
+      setPan({
+        x: e.clientX - rect.left - worldPoint.x * newZoom,
+        y: e.clientY - rect.top - worldPoint.y * newZoom,
+      });
+      setZoom(newZoom);
+      return;
+    }
+
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 80 : 1;
     setPan(p => ({
-      x: cx * (1 - factor) + p.x * factor,
-      y: cy * (1 - factor) + p.y * factor,
+      x: p.x - e.deltaX * unit,
+      y: p.y - e.deltaY * unit,
     }));
+  }, [toCanvas, zoom]);
+
+  const onCanvasTouchStart = useCallback((e) => {
+    if (e.touches.length !== 2) return;
+    e.preventDefault();
+    const metrics = getTouchMetrics(e.touches);
+    touchGestureRef.current = {
+      worldCenter: toCanvas(metrics.center.x, metrics.center.y),
+      startDistance: metrics.distance,
+      startZoom: zoom,
+    };
+    setDraggingNode(null);
+    setMarquee(null);
+    setIsPanning(true);
+  }, [toCanvas, zoom]);
+
+  const onCanvasTouchMove = useCallback((e) => {
+    const gesture = touchGestureRef.current;
+    if (!gesture || e.touches.length !== 2) return;
+    e.preventDefault();
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const metrics = getTouchMetrics(e.touches);
+    const newZoom = clamp(gesture.startZoom * (metrics.distance / gesture.startDistance), MIN_ZOOM, MAX_ZOOM);
     setZoom(newZoom);
-  }, [zoom]);
+    setPan({
+      x: metrics.center.x - rect.left - gesture.worldCenter.x * newZoom,
+      y: metrics.center.y - rect.top - gesture.worldCenter.y * newZoom,
+    });
+  }, []);
+
+  const onCanvasTouchEnd = useCallback((e) => {
+    if (e.touches.length >= 2) return;
+    touchGestureRef.current = null;
+    setIsPanning(false);
+  }, []);
 
   // ── Drag from palette ──
   const onPaletteDragStart = useCallback((e, type) => {
@@ -407,6 +534,7 @@ export default function RobotHMI() {
   // ── Port interaction ──
   const onPortMouseDown = useCallback((e, nodeId, portId, side) => {
     e.stopPropagation();
+    setSelectedIds([]);
     if (side === "out") {
       const node = flow.nodes.find(n => n.id === nodeId);
       if (!node) return;
@@ -430,6 +558,7 @@ export default function RobotHMI() {
     e.stopPropagation();
     tapRef.current = { startX: e.clientX, startY: e.clientY, startTime: Date.now(), nodeId };
     setSelected(nodeId);
+    setSelectedIds([nodeId]);
     if (isMobile) setMobileRightOpen(true); else setRightPanelOpen(true);
     if (connectionState.isSelectingTarget) return;
     const node = flow.nodes.find(n => n.id === nodeId);
@@ -475,6 +604,7 @@ export default function RobotHMI() {
   const onNodeDoubleClick = useCallback((e, nodeId) => {
     e.stopPropagation();
     setSelected(nodeId);
+    setSelectedIds([nodeId]);
     if (isMobile) setMobileRightOpen(true); else setRightPanelOpen(true);
     setRightTab("props");
   }, [isMobile]);
@@ -572,17 +702,25 @@ export default function RobotHMI() {
     const cx = rect ? rect.width / 2 : 0;
     const cy = rect ? rect.height / 2 : 0;
     const down = (e) => {
+      const isTyping = ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName);
       if (e.key === "Delete" || e.key === "Backspace") {
-        if (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "SELECT") return;
+        if (isTyping) return;
         if (selectedConn) {
           dispatch({ type: "DELETE_CONN", id: selectedConn });
           setSelectedConn(null);
           toast("Connection deleted", "info");
           addLog("Connection removed via keyboard", "warn");
+        } else if (selectedIds.length > 1) {
+          dispatch({ type: "DELETE_NODES", ids: selectedIds });
+          toast(`${selectedIds.length} nodes deleted`, "info");
+          addLog(`${selectedIds.length} nodes deleted via area selection`, "warn");
+          setSelectedIds([]);
+          setSelected(null);
         } else if (selected) {
           const def = getNodeDef(flow.nodes.find(n => n.id === selected)?.type || "");
           dispatch({ type: "DELETE_NODE", id: selected });
           setSelected(null);
+          setSelectedIds([]);
           toast(`"${def?.label || "Node"}" deleted`, "info");
           addLog(`Node deleted: ${def?.label || selected}`, "warn");
         }
@@ -590,7 +728,9 @@ export default function RobotHMI() {
       if (e.key === "Escape") {
         setConnecting(null);
         setSelected(null);
+        setSelectedIds([]);
         setSelectedConn(null);
+        setMarquee(null);
         if (connectionState.isSelectingTarget) {
           setConnectionState({ sourceNodeId: null, isSelectingTarget: false });
         }
@@ -598,16 +738,17 @@ export default function RobotHMI() {
       if (e.key === "Shift") {
         setIsShiftHeld(true);
       }
-      // Zoom shortcuts
+      if (e.metaKey || e.ctrlKey || e.altKey || isTyping) return;
+      // Canvas zoom shortcuts. Browser zoom chords are intentionally left alone.
       if (e.key === "=" || e.key === "+") {
         e.preventDefault();
         const f = 1.15;
-        setZoom(z => { const nz = Math.min(2.0, z * f); setPan(p => ({ x: cx * (1 - f) + p.x * f, y: cy * (1 - f) + p.y * f })); return nz; });
+        setZoom(z => { const nz = clamp(z * f, MIN_ZOOM, MAX_ZOOM); setPan(p => ({ x: cx * (1 - f) + p.x * f, y: cy * (1 - f) + p.y * f })); return nz; });
       }
       if (e.key === "-" || e.key === "_") {
         e.preventDefault();
         const f = 1 / 1.15;
-        setZoom(z => { const nz = Math.max(0.2, z * f); setPan(p => ({ x: cx * (1 - f) + p.x * f, y: cy * (1 - f) + p.y * f })); return nz; });
+        setZoom(z => { const nz = clamp(z * f, MIN_ZOOM, MAX_ZOOM); setPan(p => ({ x: cx * (1 - f) + p.x * f, y: cy * (1 - f) + p.y * f })); return nz; });
       }
       if (e.key === "0") {
         e.preventDefault();
@@ -648,7 +789,7 @@ export default function RobotHMI() {
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
-  }, [selected, selectedConn, flow.nodes, connectionState.isSelectingTarget]);
+  }, [selected, selectedConn, selectedIds, flow.nodes, connectionState.isSelectingTarget]);
 
   // ── Tap detection via pointer thresholds (separates drag from tap) ──
   const onNodeTapRef = useRef(onNodeTap);
@@ -809,7 +950,7 @@ export default function RobotHMI() {
                 <label style={{ fontSize: 9, letterSpacing: "0.08em", color: "#A0B4BE", display: "block", marginBottom: 5, fontWeight: 700 }}>NODE ID</label>
                 <div style={{ padding: "5px 8px", background: "#161616", border: "1px solid #2c2c2c", borderRadius: 5, fontSize: 9, color: "#7A929C" }}>{selectedNode.id}</div>
               </div>
-              <button onClick={() => { dispatch({ type: "DELETE_NODE", id: selected }); setSelected(null); toast("Node deleted", "info"); }}
+              <button onClick={() => { dispatch({ type: "DELETE_NODE", id: selected }); setSelected(null); setSelectedIds([]); toast("Node deleted", "info"); }}
                 style={{ width: "100%", padding: "8px", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)", borderRadius: 6, color: "#dc2626", cursor: "pointer", fontSize: 11, fontFamily: "'Inter', sans-serif", fontWeight: 600, letterSpacing: "0.03em", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
                 onMouseEnter={e => { e.currentTarget.style.background = "#dc2626"; e.currentTarget.style.color = "white"; }}
                 onMouseLeave={e => { e.currentTarget.style.background = "rgba(220,38,38,0.08)"; e.currentTarget.style.color = "#dc2626"; }}>
@@ -928,7 +1069,7 @@ export default function RobotHMI() {
 
         {/* Center toolbar - N8N style */}
         <div className="topbar-desktop-only" style={{ display: "flex", alignItems: "center", gap: 4, background: "#161616", border: "1px solid #2c2c2c", borderRadius: 8, padding: 3 }}>
-          <TopBtn onClick={() => { dispatch({ type: "CLEAR" }); setSelected(null); toast("Canvas cleared", "info"); }} title="Clear canvas">⊠ Clear</TopBtn>
+          <TopBtn onClick={() => { dispatch({ type: "CLEAR" }); setSelected(null); setSelectedIds([]); setMarquee(null); toast("Canvas cleared", "info"); }} title="Clear canvas">⊠ Clear</TopBtn>
           <div style={{ width: 1, height: 20, background: "#2c2c2c" }} />
           <TopBtn onClick={runMission} disabled={missionRunning} accent="#10b981" title="Run mission">{backendOnline ? "▶ Run" : "▶ Demo Run"}</TopBtn>
           <TopBtn onClick={stopMission} disabled={!missionRunning} accent="#dc2626" title="Stop">■ Stop</TopBtn>
@@ -1046,6 +1187,10 @@ export default function RobotHMI() {
           onMouseUp={onMouseUp}
           onMouseDown={onCanvasMouseDown}
           onWheel={onWheel}
+          onTouchStart={onCanvasTouchStart}
+          onTouchMove={onCanvasTouchMove}
+          onTouchEnd={onCanvasTouchEnd}
+          onTouchCancel={onCanvasTouchEnd}
           onDrop={onDrop}
           onDragOver={e => { e.preventDefault(); setDragOverCanvas(true); }}
           onDragLeave={() => setDragOverCanvas(false)}
@@ -1060,11 +1205,12 @@ export default function RobotHMI() {
             cursor: spaceHeld ? "grab" : isPanning ? "grabbing" : connecting ? "crosshair" : connectionState.isSelectingTarget ? "cell" : "default",
             outline: dragOverCanvas ? "2px dashed #3b82f6" : "none",
             outlineOffset: -2,
+            touchAction: "none",
             transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
           }}
         >
           {/* Transform group */}
-          <div style={{ transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})`, transformOrigin: "0 0", position: "absolute", width: "100%", height: "100%" }}>
+          <div className="canvas-transform-layer" style={{ transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})`, transformOrigin: "0 0", position: "absolute", width: "100%", height: "100%" }}>
 
             {/* SVG connections */}
             <svg style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", overflow: "visible", pointerEvents: "none" }}>
@@ -1098,7 +1244,7 @@ export default function RobotHMI() {
                       style={{ pointerEvents: "stroke", cursor: "pointer" }}
                       onMouseEnter={() => setHoveredConn(conn.id)}
                       onMouseLeave={() => setHoveredConn(null)}
-                      onClick={e => { e.stopPropagation(); setSelectedConn(isSel ? null : conn.id); setSelected(null); }}
+                      onClick={e => { e.stopPropagation(); setSelectedConn(isSel ? null : conn.id); setSelected(null); setSelectedIds([]); }}
                     />
                     {/* Glow behind active */}
                     {isActive && <path d={d} fill="none" stroke="#10b981" strokeWidth={6} opacity={0.12} />}
@@ -1133,7 +1279,7 @@ export default function RobotHMI() {
             {flow.nodes.map(node => {
               const def = getNodeDef(node.type);
               if (!def) return null;
-              const isSel = selected === node.id;
+              const isSel = selected === node.id || selectedIds.includes(node.id);
               const isSource = connectionState.isSelectingTarget && connectionState.sourceNodeId === node.id;
               const statusBorder = isSource ? `2px solid #3b82f6` : node.status === "running" ? `2px solid #10b981` : node.status === "done" ? `1px solid ${def.color}55` : node.status === "error" ? `2px solid #dc2626` : isSel ? `2px solid #3b82f6` : `1px solid #2c2c2c`;
 
@@ -1175,7 +1321,7 @@ export default function RobotHMI() {
                     <button
                       className="node-del"
                       title="Delete node"
-                      onClick={e => { e.stopPropagation(); dispatch({ type: "DELETE_NODE", id: node.id }); setSelected(null); addLog(`Node deleted: ${def.label}`, "warn"); toast(`"${def.label}" deleted`, "info"); }}
+                      onClick={e => { e.stopPropagation(); dispatch({ type: "DELETE_NODE", id: node.id }); setSelected(node.id === selected ? null : selected); setSelectedIds(ids => ids.filter(id => id !== node.id)); addLog(`Node deleted: ${def.label}`, "warn"); toast(`"${def.label}" deleted`, "info"); }}
                       style={{ width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)", borderRadius: 4, color: "#dc2626", cursor: "pointer", fontSize: 13, lineHeight: 1, padding: 0, flexShrink: 0, transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
                       onMouseEnter={e => { e.currentTarget.style.background = "#dc2626"; e.currentTarget.style.color = "#1e1e1e"; e.currentTarget.style.transform = "scale(1.15)"; }}
                       onMouseLeave={e => { e.currentTarget.style.background = "rgba(220,38,38,0.08)"; e.currentTarget.style.color = "#dc2626"; e.currentTarget.style.transform = "scale(1)"; }}
@@ -1197,8 +1343,23 @@ export default function RobotHMI() {
                     <div style={{ height: "100%", width: node.status === "running" ? "70%" : node.status === "done" ? "100%" : "0%", background: node.status === "running" ? "#10b981" : node.status === "done" ? def.color : "transparent", transition: "width 0.5s ease" }} />
                   </div>
                 </div>
-              );
-            })}
+                );
+              })}
+
+              {marquee && (() => {
+                const rect = normalizeRect(marquee.start, marquee.current);
+                return (
+                  <div
+                    className="selection-marquee"
+                    style={{
+                      left: rect.x,
+                      top: rect.y,
+                      width: rect.width,
+                      height: rect.height,
+                    }}
+                  />
+                );
+              })()}
           </div>
 
           {/* Empty state */}
@@ -1224,6 +1385,7 @@ export default function RobotHMI() {
           <CanvasMiniMap
             nodes={flow.nodes}
             selected={selected}
+            selectedIds={selectedIds}
             pan={pan}
             zoom={zoom}
             canvasSize={canvasSize}
@@ -1246,7 +1408,12 @@ export default function RobotHMI() {
                 Connection selected · click × on wire or press Delete to remove
               </div>
             )}
-            {selected && !connecting && !selectedConn && (
+            {selectedIds.length > 1 && !connecting && !selectedConn && (
+              <div style={{ padding: "4px 12px", background: "#1e1e1e", border: "1px solid #3b82f6", borderRadius: 20, fontSize: 11, color: "#A0B4BE", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+                {selectedIds.length} nodes selected · press Delete to remove
+              </div>
+            )}
+            {selected && selectedIds.length <= 1 && !connecting && !selectedConn && (
               <div style={{ padding: "4px 12px", background: "#1e1e1e", border: "1px solid #2c2c2c", borderRadius: 20, fontSize: 11, color: "#7A929C", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
                 Press Delete to remove node
               </div>
@@ -1445,7 +1612,7 @@ function NodePalette({ expandedCategories, onToggleCategory, onPaletteDragStart,
   );
 }
 
-function CanvasMiniMap({ nodes, selected, pan, zoom, canvasSize }) {
+function CanvasMiniMap({ nodes, selected, selectedIds = [], pan, zoom, canvasSize }) {
   if (!nodes.length || canvasSize.width <= 0 || canvasSize.height <= 0) return null;
 
   const width = 168;
@@ -1456,12 +1623,17 @@ function CanvasMiniMap({ nodes, selected, pan, zoom, canvasSize }) {
     width: canvasSize.width / zoom,
     height: canvasSize.height / zoom,
   };
+  const visibleNodes = nodes.filter(node =>
+    rectsIntersect(
+      { x: node.x, y: node.y, width: NODE_W, height: NODE_H },
+      viewport,
+    )
+  );
 
-  const pad = 160;
-  const minX = Math.min(...nodes.map(node => node.x), viewport.x) - pad;
-  const minY = Math.min(...nodes.map(node => node.y), viewport.y) - pad;
-  const maxX = Math.max(...nodes.map(node => node.x + NODE_W), viewport.x + viewport.width) + pad;
-  const maxY = Math.max(...nodes.map(node => node.y + NODE_H), viewport.y + viewport.height) + pad;
+  const minX = viewport.x;
+  const minY = viewport.y;
+  const maxX = viewport.x + viewport.width;
+  const maxY = viewport.y + viewport.height;
   const worldW = Math.max(1, maxX - minX);
   const worldH = Math.max(1, maxY - minY);
   const scale = Math.min(width / worldW, height / worldH);
@@ -1481,7 +1653,7 @@ function CanvasMiniMap({ nodes, selected, pan, zoom, canvasSize }) {
     <div className="canvas-minimap" aria-hidden="true">
       <svg viewBox={`0 0 ${width} ${height}`} width={width} height={height}>
         <rect x="0" y="0" width={width} height={height} rx="12" fill="rgba(7,10,14,0.92)" />
-        {nodes.map(node => {
+        {visibleNodes.map(node => {
           const def = getNodeDef(node.type);
           const rect = mapRect({ x: node.x, y: node.y, width: NODE_W, height: NODE_H });
           return (
@@ -1493,7 +1665,7 @@ function CanvasMiniMap({ nodes, selected, pan, zoom, canvasSize }) {
               height={Math.max(4, rect.height)}
               rx="2"
               fill={def?.color || "#3b82f6"}
-              opacity={selected === node.id ? "1" : "0.78"}
+              opacity={selected === node.id || selectedIds.includes(node.id) ? "1" : "0.78"}
             />
           );
         })}
