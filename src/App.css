@@ -16,45 +16,29 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-@keyframes pulse-border {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(59,130,246,0.6), 0 1px 4px rgba(0,0,0,0.04);
-  }
-  50% {
-    box-shadow: 0 0 0 6px rgba(59,130,246,0), 0 1px 4px rgba(0,0,0,0.04);
-  }
-}
-
-@keyframes node-pop-in {
+@keyframes palette-list-open {
   0% {
     opacity: 0;
-    transform: translateY(18px) scale(0.92);
-    filter: blur(8px);
-  }
-  62% {
-    opacity: 1;
-    transform: translateY(-5px) scale(1.035);
-    filter: blur(0);
+    transform: translateY(-6px) scaleY(0.94);
   }
   100% {
     opacity: 1;
-    transform: translateY(0) scale(1);
-    filter: blur(0);
+    transform: translateY(0) scaleY(1);
   }
 }
 
-@keyframes wire-flow {
-  to { stroke-dashoffset: -36; }
-}
-
-@keyframes port-breathe {
-  0%, 100% {
-    opacity: 0.78;
-    filter: drop-shadow(0 0 0 rgba(56,189,248,0));
+@keyframes palette-block-rise {
+  0% {
+    opacity: 0;
+    transform: translateX(-10px) translateY(6px) scale(0.96);
   }
-  50% {
+  70% {
     opacity: 1;
-    filter: drop-shadow(0 0 8px rgba(56,189,248,0.52));
+    transform: translateX(1px) translateY(-1px) scale(1.015);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) translateY(0) scale(1);
   }
 }
 
@@ -154,11 +138,25 @@ body {
   transform: rotate(90deg);
 }
 
+.palette-group-trigger:hover .palette-chevron {
+  color: #D7E2E7;
+  transform: translateX(2px);
+}
+
+.palette-group-trigger:hover .palette-chevron-open {
+  transform: rotate(90deg) translateX(2px);
+}
+
+.palette-group-trigger:hover .palette-category-dot {
+  transform: scale(1.22);
+}
+
 .palette-category-dot,
 .palette-block-dot {
   width: 10px;
   height: 10px;
   border-radius: 999px;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
 
 .palette-category-label {
@@ -185,6 +183,8 @@ body {
   grid-template-columns: 1fr 1fr;
   gap: 7px;
   padding: 4px 6px 8px 40px;
+  transform-origin: top;
+  animation: palette-list-open 0.18s cubic-bezier(0.2,0.9,0.2,1);
 }
 
 .palette-block {
@@ -201,24 +201,55 @@ body {
   cursor: pointer;
   font-family: inherit;
   font-size: 12px;
-  transition: background 0.16s ease, border-color 0.16s ease, transform 0.16s ease;
+  position: relative;
+  overflow: hidden;
+  animation: palette-block-rise 0.28s cubic-bezier(0.2,0.9,0.2,1) both;
+  animation-delay: calc(var(--block-index, 0) * 32ms);
+  transform-origin: left center;
+  transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.palette-block::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 0%, rgba(255,255,255,0.09) 45%, transparent 70%);
+  opacity: 0;
+  transform: translateX(-100%);
+  transition: opacity 0.16s ease, transform 0.28s ease;
+  pointer-events: none;
 }
 
 .palette-block:hover {
-  border-color: rgba(52,211,153,0.36);
-  background: rgba(52,211,153,0.08);
-  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--block-color, #34d399) 45%, transparent);
+  background: color-mix(in srgb, var(--block-color, #34d399) 12%, rgba(255,255,255,0.035));
+  box-shadow: 0 10px 24px rgba(0,0,0,0.22), 0 0 0 1px color-mix(in srgb, var(--block-color, #34d399) 18%, transparent);
+  transform: translateX(3px) translateY(-2px);
+}
+
+.palette-block:hover::after {
+  opacity: 1;
+  transform: translateX(100%);
+}
+
+.palette-block:hover .palette-block-dot {
+  transform: scale(1.24);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--block-color, #34d399) 70%, transparent);
+}
+
+.palette-block:active {
+  transform: translateX(1px) translateY(0) scale(0.98);
 }
 
 .palette-block-danger {
-  border-color: rgba(239,68,68,0.24);
-  background: rgba(239,68,68,0.075);
+  border-color: rgba(239,68,68,0.26);
+  background: rgba(239,68,68,0.08);
   color: #fecaca;
 }
 
 .palette-block-danger:hover {
-  border-color: rgba(239,68,68,0.54);
-  background: rgba(239,68,68,0.15);
+  border-color: rgba(239,68,68,0.58);
+  background: rgba(239,68,68,0.16);
 }
 
 .palette-block-label {
@@ -333,61 +364,13 @@ body {
 
 /* ── Node touch targets ── */
 .node-touch-target {
-  animation: node-pop-in 0.32s cubic-bezier(0.2,0.9,0.2,1);
-  transform-origin: center;
-  transition: box-shadow 0.15s ease, transform 0.18s cubic-bezier(0.2,0.9,0.2,1), border-color 0.16s ease;
-  will-change: transform, box-shadow;
-}
-
-.node-touch-target:hover {
-  box-shadow: 0 18px 46px rgba(0,0,0,0.32), 0 0 0 1px rgba(255,255,255,0.06) !important;
-}
-
-.node-dragging {
-  z-index: 30;
-  cursor: grabbing !important;
-  box-shadow: 0 26px 60px rgba(0,0,0,0.42), 0 0 0 3px rgba(56,189,248,0.2) !important;
-}
-
-.node-source {
-  animation: pulse-border 1.5s ease-in-out infinite;
-}
-
-.connection-path {
-  animation: wire-flow 1.2s linear infinite;
-}
-
-.connection-path-preview {
-  animation-duration: 0.72s;
-}
-
-.node-port {
-  position: absolute;
-  z-index: 5;
-  width: 14px;
-  height: 14px;
-  padding: 0;
-  border: 2px solid;
-  border-radius: 999px;
-  cursor: crosshair;
-  opacity: 0.82;
-  transition: transform 0.16s ease, opacity 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
-  animation: port-breathe 1.9s ease-in-out infinite;
-}
-
-.node-port:hover {
-  opacity: 1;
-  transform: scale(1.28);
+  transition: box-shadow 0.15s ease;
 }
 
 @media (max-width: 1023px) {
   .node-touch-target {
     min-width: 60px !important;
     min-height: 60px !important;
-  }
-  .node-touch-target .node-port {
-    width: 20px !important;
-    height: 20px !important;
   }
 }
 

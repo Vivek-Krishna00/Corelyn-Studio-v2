@@ -28,7 +28,7 @@ const NODE_DEFS = [
   { type: "rotate_left", label: "Rotate Left", category: "motion", icon: "🔄", color: "#3b82f6", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { angular_velocity: { label: "Angular Velocity (rad/s)", type: "number", default: 0.5 }, direction: { label: "Direction", type: "select", options: ["CCW", "CW"], default: "CCW" } } },
   { type: "rotate_right", label: "Rotate Right", category: "motion", icon: "🔄", color: "#3b82f6", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { angular_velocity: { label: "Angular Velocity (rad/s)", type: "number", default: 0.5 }, direction: { label: "Direction", type: "select", options: ["CW", "CCW"], default: "CW" } } },
   { type: "set_speed", label: "Set Speed", category: "motion", icon: "⚡", color: "#3b82f6", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { max_linear_velocity: { label: "Max Linear Vel (m/s)", type: "number", default: 1.0 }, max_angular_velocity: { label: "Max Angular Vel (rad/s)", type: "number", default: 1.5 } } },
-  { type: "stop", label: "Stop", category: "motion", icon: "🛑", color: "#3b82f6", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { brake_type: { label: "Brake Type", type: "select", options: ["controlled", "emergency"], default: "controlled" }, deceleration_rate: { label: "Deceleration (m/s²)", type: "number", default: 0.5 } } },
+  { type: "stop", label: "Stop", category: "motion", icon: "🛑", color: "#ef4444", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { brake_type: { label: "Brake Type", type: "select", options: ["controlled", "emergency"], default: "controlled" }, deceleration_rate: { label: "Deceleration (m/s²)", type: "number", default: 0.5 } } },
 
   // ── NAVIGATION ──
   { type: "go_to_waypoint", label: "Go to Waypoint", category: "navigation", icon: "📍", color: "#8b5cf6", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { waypoint_id: { label: "Waypoint ID", type: "text", default: "WP-01" }, coordinates_xy: { label: "Coordinates (x,y)", type: "text", default: "10.5,20.3" } } },
@@ -1105,9 +1105,7 @@ export default function RobotHMI() {
                     {/* Selected glow */}
                     {isSel && <path d={d} fill="none" stroke="#3b82f6" strokeWidth={6} opacity={0.15} />}
                     {/* Main visible wire */}
-                    <path className="connection-path" d={d} fill="none" stroke={stroke} strokeWidth={isSel ? 2.5 : isHov ? 2 : isActive ? 2.5 : 1.5} markerEnd={mkr}
-                      strokeDasharray={isErr ? "4 8" : "10 8"}
-                      strokeLinecap="round"
+                    <path d={d} fill="none" stroke={stroke} strokeWidth={isSel ? 2.5 : isHov ? 2 : isActive ? 2.5 : 1.5} markerEnd={mkr}
                       style={{ pointerEvents: "none", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
                     />
                     {/* Midpoint delete button — shown on hover or selected */}
@@ -1127,7 +1125,7 @@ export default function RobotHMI() {
               })}
               {connecting && (() => {
                 const cx = (connecting.x + mousePos.x) / 2;
-                return <path className="connection-path connection-path-preview" d={`M${connecting.x} ${connecting.y} C${cx} ${connecting.y} ${cx} ${mousePos.y} ${mousePos.x} ${mousePos.y}`} fill="none" stroke="#3b82f6" strokeWidth={2} strokeDasharray="7 6" strokeLinecap="round" opacity={0.85} style={{ transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }} />;
+                return <path d={`M${connecting.x} ${connecting.y} C${cx} ${connecting.y} ${cx} ${mousePos.y} ${mousePos.x} ${mousePos.y}`} fill="none" stroke="#3b82f6" strokeWidth={2} strokeDasharray="5 3" opacity={0.85} style={{ transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }} />;
               })()}
             </svg>
 
@@ -1137,18 +1135,12 @@ export default function RobotHMI() {
               if (!def) return null;
               const isSel = selected === node.id;
               const isSource = connectionState.isSelectingTarget && connectionState.sourceNodeId === node.id;
-              const isDraggingThisNode = draggingNode?.id === node.id;
-              const nodeTransform = isDraggingThisNode
-                ? "translateY(-5px) scale(1.035)"
-                : connectionState.isSelectingTarget && !isSource && hoveredNode === node.id
-                  ? "translateY(-2px) scale(1.045)"
-                  : "translateY(0) scale(1)";
               const statusBorder = isSource ? `2px solid #3b82f6` : node.status === "running" ? `2px solid #10b981` : node.status === "done" ? `1px solid ${def.color}55` : node.status === "error" ? `2px solid #dc2626` : isSel ? `2px solid #3b82f6` : `1px solid #2c2c2c`;
 
               return (
                 <div
                   key={node.id}
-                  className={`node-touch-target ${isDraggingThisNode ? "node-dragging" : ""} ${isSource ? "node-source" : ""}`}
+                  className="node-touch-target"
                   onMouseDown={e => onNodeMouseDown(e, node.id)}
                   onDoubleClick={e => onNodeDoubleClick(e, node.id)}
                   style={{
@@ -1166,8 +1158,7 @@ export default function RobotHMI() {
                     cursor: connectionState.isSelectingTarget && !isSource ? "pointer" : "grab",
                     userSelect: "none",
                     overflow: "visible",
-                    transform: nodeTransform,
-                    transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+                    transition: "border-color 0.14s ease, box-shadow 0.14s ease",
                     fontFamily: "'Inter', system-ui, sans-serif",
                   }}
                   onMouseEnter={e => { if (!isSel && node.status !== "running") e.currentTarget.style.borderColor = "#3a3a3a"; setHoveredNode(node.id); }}
@@ -1205,25 +1196,6 @@ export default function RobotHMI() {
                   <div style={{ height: 3, background: "rgba(0,0,0,0.04)", borderRadius: "0 0 9px 9px", overflow: "hidden" }}>
                     <div style={{ height: "100%", width: node.status === "running" ? "70%" : node.status === "done" ? "100%" : "0%", background: node.status === "running" ? "#10b981" : node.status === "done" ? def.color : "transparent", transition: "width 0.5s ease" }} />
                   </div>
-
-                  {["in", "out"].map(side => {
-                    const sidePorts = def.ports.filter(port => port.side === side);
-                    return sidePorts.map((port, idx) => (
-                      <button
-                        key={`${side}-${port.id}`}
-                        className={`port node-port node-port-${side}`}
-                        title={`${port.label} ${side === "in" ? "input" : "output"}`}
-                        onMouseDown={e => onPortMouseDown(e, node.id, port.id, side)}
-                        style={{
-                          top: portY(idx, sidePorts.length, NODE_H) - 7,
-                          [side === "in" ? "left" : "right"]: -8,
-                          borderColor: def.color,
-                          background: isSel || hoveredNode === node.id || isDraggingThisNode ? def.color : "#101923",
-                          boxShadow: isSel || hoveredNode === node.id || isDraggingThisNode ? `0 0 0 4px ${def.color}22, 0 0 18px ${def.color}66` : "0 0 0 3px rgba(8,12,16,0.88)",
-                        }}
-                      />
-                    ));
-                  })}
                 </div>
               );
             })}
@@ -1445,19 +1417,23 @@ function NodePalette({ expandedCategories, onToggleCategory, onPaletteDragStart,
               </button>
               {isOpen && (
                 <div className="palette-block-list">
-                  {items.map(def => (
-                    <button
-                      key={def.type}
-                      className={`palette-block ${def.type === "stop" ? "palette-block-danger" : ""}`}
-                      draggable
-                      onDragStart={event => onPaletteDragStart(event, def.type)}
-                      onClick={() => onAddNode(def.type)}
-                      type="button"
-                    >
-                      <span className="palette-block-dot" style={{ background: def.type === "stop" ? "#ef4444" : def.color }} />
-                      <span className="palette-block-label">{def.label}</span>
-                    </button>
-                  ))}
+                  {items.map((def, index) => {
+                    const blockColor = def.color;
+                    return (
+                      <button
+                        key={def.type}
+                        className={`palette-block ${def.type === "stop" ? "palette-block-danger" : ""}`}
+                        draggable
+                        onDragStart={event => onPaletteDragStart(event, def.type)}
+                        onClick={() => onAddNode(def.type)}
+                        type="button"
+                        style={{ "--block-index": index, "--block-color": blockColor }}
+                      >
+                        <span className="palette-block-dot" style={{ background: blockColor }} />
+                        <span className="palette-block-label">{def.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
