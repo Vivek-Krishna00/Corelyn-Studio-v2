@@ -1298,6 +1298,17 @@ export default function RobotHMI() {
             transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
           }}
         >
+          <button
+            className="right-panel-toggle"
+            type="button"
+            title={rightPanelOpen ? "Collapse node panel" : "Expand node panel"}
+            aria-label={rightPanelOpen ? "Collapse node panel" : "Expand node panel"}
+            aria-pressed={rightPanelOpen}
+            onClick={() => setRightPanelOpen(open => !open)}
+          >
+            {rightPanelOpen ? "›" : "‹"}
+          </button>
+
           {/* Transform group */}
           <div className="canvas-transform-layer" style={{ transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})`, transformOrigin: "0 0", position: "absolute", width: "100%", height: "100%" }}>
 
