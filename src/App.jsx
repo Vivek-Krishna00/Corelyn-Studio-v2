@@ -1003,7 +1003,7 @@ export default function RobotHMI() {
           )
         ) : (
           sidebarOpen && (
-            <div className="left-sidebar">
+            <div className="left-sidebar left-sidebar-floating">
               <NodePalette
                 expandedCategories={expandedCategories}
                 onToggleCategory={toggleCategory}
@@ -1029,12 +1029,12 @@ export default function RobotHMI() {
           onDragLeave={() => setDragOverCanvas(false)}
           style={{
             flex: 1, position: "relative", overflow: "hidden",
-            background: "#141414",
+            background: "#111418",
             backgroundImage:
-`radial-gradient(circle at 0 0, rgba(255,255,255,0.16) 2px, transparent 2px),
-                linear-gradient(rgba(255,255,255,0.045) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255,255,255,0.045) 1px, transparent 1px)`,
-            backgroundSize: "20px 20px, 20px 20px, 20px 20px",
+`radial-gradient(circle at center, rgba(161,174,187,0.28) 1.4px, transparent 1.8px),
+                linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px)`,
+            backgroundSize: "48px 48px, 24px 24px, 24px 24px",
             cursor: spaceHeld ? "grab" : isPanning ? "grabbing" : connecting ? "crosshair" : connectionState.isSelectingTarget ? "cell" : "default",
             outline: dragOverCanvas ? "2px dashed #3b82f6" : "none",
             outlineOffset: -2,
@@ -1123,12 +1123,16 @@ export default function RobotHMI() {
                   onDoubleClick={e => onNodeDoubleClick(e, node.id)}
                   style={{
                     position: "absolute", left: node.x, top: node.y, width: NODE_W, height: "auto",
-                    background: isSel ? "rgba(32,32,32,0.88)" : "rgba(26,26,26,0.78)",
-                    backdropFilter: "blur(4px)",
-                    WebkitBackdropFilter: "blur(4px)",
+                    background: isSel ? "rgba(24,31,39,0.96)" : "rgba(18,24,31,0.92)",
+                    backdropFilter: "blur(12px)",
+                    WebkitBackdropFilter: "blur(12px)",
                     border: statusBorder,
-                    borderRadius: 10,
-                    boxShadow: isSel ? "0 0 0 3px rgba(59,130,246,0.25),0 4px 12px rgba(0,0,0,0.06)" : node.status === "running" ? "0 0 0 3px rgba(16,185,129,0.15),0 4px 12px rgba(0,0,0,0.06)" : "0 1px 4px rgba(0,0,0,0.04)",
+                    borderRadius: 14,
+                    boxShadow: isSel
+                      ? "0 0 0 3px rgba(56,189,248,0.22), 0 18px 40px rgba(0,0,0,0.26)"
+                      : node.status === "running"
+                        ? "0 0 0 3px rgba(16,185,129,0.16), 0 18px 40px rgba(0,0,0,0.24)"
+                        : "0 14px 34px rgba(0,0,0,0.22)",
                     cursor: connectionState.isSelectingTarget && !isSource ? "pointer" : "grab",
                     userSelect: "none",
                     overflow: "visible",
