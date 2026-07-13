@@ -174,7 +174,7 @@ body {
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 650;
 }
 
@@ -202,15 +202,15 @@ body {
   display: flex;
   align-items: flex-start;
   gap: 7px;
-  min-height: 32px;
-  padding: 7px 8px;
+  min-height: 38px;
+  padding: 8px 9px;
   border: 1px solid rgba(255,255,255,0.09);
   border-radius: 6px;
   background: rgba(255,255,255,0.035);
   color: #C9D3D8;
   cursor: pointer;
   font-family: inherit;
-  font-size: 12px;
+  font-size: 16px;
   position: relative;
   overflow: hidden;
   animation: palette-block-rise 0.28s cubic-bezier(0.2,0.9,0.2,1) both;
