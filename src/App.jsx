@@ -1105,7 +1105,9 @@ export default function RobotHMI() {
                     {/* Selected glow */}
                     {isSel && <path d={d} fill="none" stroke="#3b82f6" strokeWidth={6} opacity={0.15} />}
                     {/* Main visible wire */}
-                    <path d={d} fill="none" stroke={stroke} strokeWidth={isSel ? 2.5 : isHov ? 2 : isActive ? 2.5 : 1.5} markerEnd={mkr}
+                    <path className="connection-path" d={d} fill="none" stroke={stroke} strokeWidth={isSel ? 2.5 : isHov ? 2 : isActive ? 2.5 : 1.5} markerEnd={mkr}
+                      strokeDasharray={isErr ? "4 8" : "10 8"}
+                      strokeLinecap="round"
                       style={{ pointerEvents: "none", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
                     />
                     {/* Midpoint delete button — shown on hover or selected */}
@@ -1125,7 +1127,7 @@ export default function RobotHMI() {
               })}
               {connecting && (() => {
                 const cx = (connecting.x + mousePos.x) / 2;
-                return <path d={`M${connecting.x} ${connecting.y} C${cx} ${connecting.y} ${cx} ${mousePos.y} ${mousePos.x} ${mousePos.y}`} fill="none" stroke="#3b82f6" strokeWidth={2} strokeDasharray="5 3" opacity={0.85} style={{ transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }} />;
+                return <path className="connection-path connection-path-preview" d={`M${connecting.x} ${connecting.y} C${cx} ${connecting.y} ${cx} ${mousePos.y} ${mousePos.x} ${mousePos.y}`} fill="none" stroke="#3b82f6" strokeWidth={2} strokeDasharray="7 6" strokeLinecap="round" opacity={0.85} style={{ transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }} />;
               })()}
             </svg>
 
@@ -1135,12 +1137,18 @@ export default function RobotHMI() {
               if (!def) return null;
               const isSel = selected === node.id;
               const isSource = connectionState.isSelectingTarget && connectionState.sourceNodeId === node.id;
+              const isDraggingThisNode = draggingNode?.id === node.id;
+              const nodeTransform = isDraggingThisNode
+                ? "translateY(-5px) scale(1.035)"
+                : connectionState.isSelectingTarget && !isSource && hoveredNode === node.id
+                  ? "translateY(-2px) scale(1.045)"
+                  : "translateY(0) scale(1)";
               const statusBorder = isSource ? `2px solid #3b82f6` : node.status === "running" ? `2px solid #10b981` : node.status === "done" ? `1px solid ${def.color}55` : node.status === "error" ? `2px solid #dc2626` : isSel ? `2px solid #3b82f6` : `1px solid #2c2c2c`;
 
               return (
                 <div
                   key={node.id}
-                  className="node-touch-target"
+                  className={`node-touch-target ${isDraggingThisNode ? "node-dragging" : ""} ${isSource ? "node-source" : ""}`}
                   onMouseDown={e => onNodeMouseDown(e, node.id)}
                   onDoubleClick={e => onNodeDoubleClick(e, node.id)}
                   style={{
@@ -1158,8 +1166,7 @@ export default function RobotHMI() {
                     cursor: connectionState.isSelectingTarget && !isSource ? "pointer" : "grab",
                     userSelect: "none",
                     overflow: "visible",
-                    animation: isSource ? "pulse-border 1.5s ease-in-out infinite" : "none",
-                    transform: connectionState.isSelectingTarget && !isSource && hoveredNode === node.id ? "scale(1.05)" : "scale(1)",
+                    transform: nodeTransform,
                     transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
                     fontFamily: "'Inter', system-ui, sans-serif",
                   }}
@@ -1198,6 +1205,25 @@ export default function RobotHMI() {
                   <div style={{ height: 3, background: "rgba(0,0,0,0.04)", borderRadius: "0 0 9px 9px", overflow: "hidden" }}>
                     <div style={{ height: "100%", width: node.status === "running" ? "70%" : node.status === "done" ? "100%" : "0%", background: node.status === "running" ? "#10b981" : node.status === "done" ? def.color : "transparent", transition: "width 0.5s ease" }} />
                   </div>
+
+                  {["in", "out"].map(side => {
+                    const sidePorts = def.ports.filter(port => port.side === side);
+                    return sidePorts.map((port, idx) => (
+                      <button
+                        key={`${side}-${port.id}`}
+                        className={`port node-port node-port-${side}`}
+                        title={`${port.label} ${side === "in" ? "input" : "output"}`}
+                        onMouseDown={e => onPortMouseDown(e, node.id, port.id, side)}
+                        style={{
+                          top: portY(idx, sidePorts.length, NODE_H) - 7,
+                          [side === "in" ? "left" : "right"]: -8,
+                          borderColor: def.color,
+                          background: isSel || hoveredNode === node.id || isDraggingThisNode ? def.color : "#101923",
+                          boxShadow: isSel || hoveredNode === node.id || isDraggingThisNode ? `0 0 0 4px ${def.color}22, 0 0 18px ${def.color}66` : "0 0 0 3px rgba(8,12,16,0.88)",
+                        }}
+                      />
+                    ));
+                  })}
                 </div>
               );
             })}
@@ -1326,11 +1352,14 @@ export default function RobotHMI() {
 }
 
 function TopBtn({ children, onClick, disabled, accent, title }) {
+  const disabledColor = accent || "#6f8088";
+  const color = disabled ? disabledColor : accent || "#A0B4BE";
+  const disabledBackground = disabled && accent ? `${accent}16` : "transparent";
   return (
     <button onClick={onClick} disabled={disabled} title={title}
-      style={{ padding: "5px 12px", borderRadius: 6, border: "none", background: "transparent", color: disabled ? "#3a3a3a" : accent || "#A0B4BE", cursor: disabled ? "not-allowed" : "pointer", fontSize: 11, fontFamily: "'Inter', sans-serif", fontWeight: 600, letterSpacing: "0.02em", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)", opacity: disabled ? 0.4 : 1 }}
+      style={{ padding: "5px 12px", borderRadius: 6, border: disabled && accent ? `1px solid ${accent}30` : "none", background: disabledBackground, color, cursor: disabled ? "not-allowed" : "pointer", fontSize: 11, fontFamily: "'Inter', sans-serif", fontWeight: 600, letterSpacing: "0.02em", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)", opacity: disabled ? 0.72 : 1 }}
       onMouseEnter={e => { if (!disabled) { e.currentTarget.style.background = "#262626"; e.currentTarget.style.color = accent || "#f2f2f2"; } }}
-      onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = disabled ? "#3a3a3a" : accent || "#A0B4BE"; }}>
+      onMouseLeave={e => { e.currentTarget.style.background = disabledBackground; e.currentTarget.style.color = color; }}>
       {children}
     </button>
   );
@@ -1419,13 +1448,13 @@ function NodePalette({ expandedCategories, onToggleCategory, onPaletteDragStart,
                   {items.map(def => (
                     <button
                       key={def.type}
-                      className="palette-block"
+                      className={`palette-block ${def.type === "stop" ? "palette-block-danger" : ""}`}
                       draggable
                       onDragStart={event => onPaletteDragStart(event, def.type)}
                       onClick={() => onAddNode(def.type)}
                       type="button"
                     >
-                      <span className="palette-block-dot" style={{ background: def.color }} />
+                      <span className="palette-block-dot" style={{ background: def.type === "stop" ? "#ef4444" : def.color }} />
                       <span className="palette-block-label">{def.label}</span>
                     </button>
                   ))}
