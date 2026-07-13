@@ -12,6 +12,7 @@ dist
 dist-ssr
 release
 *.local
+.playwright-mcp/
 
 # Editor directories and files
 .vscode/*

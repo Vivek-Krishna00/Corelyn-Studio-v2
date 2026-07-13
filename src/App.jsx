@@ -691,6 +691,7 @@ export default function RobotHMI() {
   }, []);
 
   useEffect(() => {
+    if (!isLoggedIn) return;
     const element = canvasRef.current;
     if (!element) return;
 
@@ -708,7 +709,7 @@ export default function RobotHMI() {
       observer.disconnect();
       window.removeEventListener("resize", updateSize);
     };
-  }, []);
+  }, [isLoggedIn]);
 
   // ── Backend health check ──
   useEffect(() => {
