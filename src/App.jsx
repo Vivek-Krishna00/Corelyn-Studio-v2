@@ -441,6 +441,7 @@ export default function RobotHMI() {
   }, []);
 
   useEffect(() => {
+    if (!isLoggedIn) return;
     const element = canvasRef.current;
     if (!element) return;
 
@@ -498,7 +499,7 @@ export default function RobotHMI() {
       element.removeEventListener("gesturechange", handleGestureChange);
       element.removeEventListener("gestureend", handleGestureEnd);
     };
-  }, [onWheel, toCanvas, zoom]);
+  }, [isLoggedIn, onWheel, toCanvas, zoom]);
 
   useEffect(() => {
     if (!isLoggedIn) return;
@@ -909,7 +910,6 @@ export default function RobotHMI() {
     const handler = (e) => {
       setIsMobile(e.matches);
       if (e.matches) {
-        setSidebarOpen(false);
         setRightPanelOpen(false);
       } else {
         setMobileSidebarOpen(false);
