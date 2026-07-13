@@ -65,6 +65,25 @@ const CATEGORY_META = {
   sensing: { label: "Sensing", color: "#e11d48" },
 };
 
+const DEFAULT_EXPANDED_CATEGORIES = {
+  flow: false,
+  motion: true,
+  navigation: true,
+  agv_amr: false,
+  control: false,
+  sensing: false,
+};
+
+function buildDefaultParams(def) {
+  const defaultParams = {};
+  if (def?.params) {
+    Object.entries(def.params).forEach(([key, spec]) => {
+      defaultParams[key] = spec.default;
+    });
+  }
+  return defaultParams;
+}
+
 function uid() { return Math.random().toString(36).slice(2, 9); }
 function getNodeDef(type) { return NODE_DEFS.find(n => n.type === type); }
 
@@ -173,6 +192,7 @@ export default function RobotHMI() {
   const [isShiftHeld, setIsShiftHeld] = useState(false);
   const [deployModalOpen, setDeployModalOpen] = useState(false);
   const [backendOnline, setBackendOnline] = useState(false);
+  const [expandedCategories, setExpandedCategories] = useState(DEFAULT_EXPANDED_CATEGORIES);
 
   const canvasRef = useRef(null);
   const importInputRef = useRef(null);
@@ -197,6 +217,49 @@ export default function RobotHMI() {
     if (!rect) return { x: 0, y: 0 };
     return { x: (cx - rect.left - pan.x) / zoom, y: (cy - rect.top - pan.y) / zoom };
   }, [pan, zoom]);
+
+  function addNodeToCanvas(nodeType, canvasPoint, options = {}) {
+    const def = getNodeDef(nodeType);
+    if (!def) {
+      toast("Unknown block type", "error");
+      return null;
+    }
+
+    const defaultParams = buildDefaultParams(def);
+    const stagger = options.stagger ?? 0;
+    const newNode = {
+      id: uid(),
+      type: nodeType,
+      x: canvasPoint.x - NODE_W / 2 + stagger,
+      y: canvasPoint.y - NODE_H / 2 + stagger,
+      params: defaultParams,
+      status: "idle",
+    };
+
+    dispatch({ type: "ADD_NODE", node: newNode });
+    setSelected(newNode.id);
+    setRightTab("props");
+    addLog(`Node added: ${def.label}`, "info");
+    toast(`"${def.label}" added to canvas`, "success");
+
+    if (options.closeMobile) {
+      setMobileSidebarOpen(false);
+    }
+
+    return newNode;
+  }
+
+  function getVisibleCanvasCenter() {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return { x: 220, y: 160 };
+    return toCanvas(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  }
+
+  function addNodeFromPalette(nodeType) {
+    const center = getVisibleCanvasCenter();
+    const stagger = (flow.nodes.length % 6) * 24;
+    addNodeToCanvas(nodeType, center, { stagger, closeMobile: isMobile });
+  }
 
   // ── Mouse handlers ──
   const onMouseMove = useCallback((e) => {
@@ -252,22 +315,20 @@ export default function RobotHMI() {
     e.dataTransfer.setData("nodeType", type);
   }, []);
 
+  const toggleCategory = useCallback((category) => {
+    setExpandedCategories(current => ({
+      ...current,
+      [category]: !current[category],
+    }));
+  }, []);
+
   const onDrop = useCallback((e) => {
     e.preventDefault();
     setDragOverCanvas(false);
     const nodeType = e.dataTransfer.getData("nodeType");
     if (!nodeType) return;
-    const def = getNodeDef(nodeType);
-    if (!def) return;
     const pos = toCanvas(e.clientX, e.clientY);
-    const defaultParams = {};
-    if (def.params) Object.entries(def.params).forEach(([k, v]) => { defaultParams[k] = v.default; });
-    const newNode = { id: uid(), type: nodeType, x: pos.x - NODE_W / 2, y: pos.y - NODE_H / 2, params: defaultParams, status: "idle" };
-    dispatch({ type: "ADD_NODE", node: newNode });
-    setSelected(newNode.id);
-    setRightTab("props");
-    addLog(`Node added: ${def.label}`, "info");
-    toast(`"${def.label}" added to canvas`, "success");
+    addNodeToCanvas(nodeType, pos);
   }, [toCanvas]);
 
   // ── Import nodes from JSON file ──
@@ -930,64 +991,27 @@ export default function RobotHMI() {
         {isMobile ? (
           mobileSidebarOpen && (
             <div className="left-sidebar">
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: "1px solid #2c2c2c" }}>
-                <span style={{ fontSize: 10, color: "#7A929C", letterSpacing: "0.08em", fontWeight: 700 }}>NODES — drag to canvas</span>
-                <button onClick={() => setMobileSidebarOpen(false)} style={{ background: "none", border: "none", color: "#7A929C", cursor: "pointer", fontSize: 16, padding: "2px 6px" }}>✕</button>
-              </div>
-              <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
-                {CATEGORY_ORDER.map(cat => (
-                  <div key={cat} style={{ marginBottom: 3 }}>
-                    <div style={{ padding: "8px 14px 4px", fontSize: 10, color: CATEGORY_META[cat].color, letterSpacing: "0.1em", fontWeight: 700, opacity: 0.9 }}>
-                      {CATEGORY_META[cat].label.toUpperCase()}
-                    </div>
-                    {NODE_DEFS.filter(n => n.category === cat).map(def => (
-                      <div
-                        key={def.type}
-                        draggable
-                        onDragStart={e => onPaletteDragStart(e, def.type)}
-                        className="palette-item"
-                        style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 14px", cursor: "grab", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)", userSelect: "none" }}
-                        onMouseEnter={e => e.currentTarget.style.background = "#262626"}
-                        onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                      >
-                        <div className="palette-item-icon" style={{ width: 26, height: 26, borderRadius: 5, background: `${def.color}10`, border: `1px solid ${def.color}20`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: def.color, flexShrink: 0 }}>{def.icon}</div>
-                        <span className="palette-item-label" style={{ fontSize: 13, color: "#C7D1D6", fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{def.label}</span>
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
+              <NodePalette
+                expandedCategories={expandedCategories}
+                onToggleCategory={toggleCategory}
+                onPaletteDragStart={onPaletteDragStart}
+                onAddNode={addNodeFromPalette}
+                onClose={() => setMobileSidebarOpen(false)}
+                isMobile={isMobile}
+              />
             </div>
           )
         ) : (
           sidebarOpen && (
-            <div className="left-sidebar" style={{ width: 260 }}>
-              <div style={{ padding: "12px 14px 8px", fontSize: 10, color: "#7A929C", letterSpacing: "0.08em", fontWeight: 700, borderBottom: "1px solid #2c2c2c" }}>
-                NODES — drag to canvas
-              </div>
-              <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
-                {CATEGORY_ORDER.map(cat => (
-                  <div key={cat} style={{ marginBottom: 3 }}>
-                    <div style={{ padding: "8px 14px 4px", fontSize: 10, color: CATEGORY_META[cat].color, letterSpacing: "0.1em", fontWeight: 700, opacity: 0.9 }}>
-                      {CATEGORY_META[cat].label.toUpperCase()}
-                    </div>
-                    {NODE_DEFS.filter(n => n.category === cat).map(def => (
-                      <div
-                        key={def.type}
-                        draggable
-                        onDragStart={e => onPaletteDragStart(e, def.type)}
-                        className="palette-item"
-                        style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 14px", cursor: "grab", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)", userSelect: "none" }}
-                        onMouseEnter={e => e.currentTarget.style.background = "#262626"}
-                        onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                      >
-                        <div className="palette-item-icon" style={{ width: 26, height: 26, borderRadius: 5, background: `${def.color}10`, border: `1px solid ${def.color}20`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: def.color, flexShrink: 0 }}>{def.icon}</div>
-                        <span className="palette-item-label" style={{ fontSize: 13, color: "#C7D1D6", fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{def.label}</span>
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
+            <div className="left-sidebar">
+              <NodePalette
+                expandedCategories={expandedCategories}
+                onToggleCategory={toggleCategory}
+                onPaletteDragStart={onPaletteDragStart}
+                onAddNode={addNodeFromPalette}
+                onClose={() => setMobileSidebarOpen(false)}
+                isMobile={isMobile}
+              />
             </div>
           )
         )}
@@ -1324,5 +1348,59 @@ function DeployModalWrapper({ flow, onClose }) {
       onDeploy={handleDeploy}
       onDemoDeploy={handleDemoDeploy}
     />
+  );
+}
+
+function NodePalette({ expandedCategories, onToggleCategory, onPaletteDragStart, onAddNode, onClose, isMobile }) {
+  return (
+    <>
+      <div className="palette-header">
+        <div>
+          <div className="palette-eyebrow">System Blocks</div>
+          <div className="palette-title">Blocks</div>
+        </div>
+        {isMobile && (
+          <button className="palette-close" onClick={onClose} aria-label="Close blocks panel">x</button>
+        )}
+      </div>
+      <div className="palette-search" aria-hidden="true">
+        <span>⌕</span>
+        <span>Search Blocks</span>
+      </div>
+      <div className="palette-groups">
+        {CATEGORY_ORDER.map(category => {
+          const meta = CATEGORY_META[category];
+          const items = NODE_DEFS.filter(node => node.category === category);
+          const isOpen = Boolean(expandedCategories[category]);
+          return (
+            <div className="palette-group" key={category}>
+              <button className="palette-group-trigger" onClick={() => onToggleCategory(category)} type="button">
+                <span className={`palette-chevron ${isOpen ? "palette-chevron-open" : ""}`}>›</span>
+                <span className="palette-category-dot" style={{ background: meta.color, boxShadow: `0 0 14px ${meta.color}55` }} />
+                <span className="palette-category-label">{meta.label}</span>
+                <span className="palette-category-count">{items.length}</span>
+              </button>
+              {isOpen && (
+                <div className="palette-block-list">
+                  {items.map(def => (
+                    <button
+                      key={def.type}
+                      className="palette-block"
+                      draggable
+                      onDragStart={event => onPaletteDragStart(event, def.type)}
+                      onClick={() => onAddNode(def.type)}
+                      type="button"
+                    >
+                      <span className="palette-block-dot" style={{ background: def.color }} />
+                      <span className="palette-block-label">{def.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </>
   );
 }
