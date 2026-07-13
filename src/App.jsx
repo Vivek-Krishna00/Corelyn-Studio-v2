@@ -1419,10 +1419,11 @@ function NodePalette({ expandedCategories, onToggleCategory, onPaletteDragStart,
                 <div className="palette-block-list">
                   {items.map((def, index) => {
                     const blockColor = def.color;
+                    const isWideBlock = def.label.length > 10;
                     return (
                       <button
                         key={def.type}
-                        className={`palette-block ${def.type === "stop" ? "palette-block-danger" : ""}`}
+                        className={`palette-block ${isWideBlock ? "palette-block-wide" : ""} ${def.type === "stop" ? "palette-block-danger" : ""}`}
                         draggable
                         onDragStart={event => onPaletteDragStart(event, def.type)}
                         onClick={() => onAddNode(def.type)}

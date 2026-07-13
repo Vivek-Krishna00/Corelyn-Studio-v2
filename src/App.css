@@ -190,7 +190,7 @@ body {
 .palette-block {
   min-width: 0;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 7px;
   min-height: 32px;
   padding: 7px 8px;
@@ -241,6 +241,10 @@ body {
   transform: translateX(1px) translateY(0) scale(0.98);
 }
 
+.palette-block-wide {
+  grid-column: 1 / -1;
+}
+
 .palette-block-danger {
   border-color: rgba(239,68,68,0.26);
   background: rgba(239,68,68,0.08);
@@ -253,9 +257,17 @@ body {
 }
 
 .palette-block-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  line-height: 1.28;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-align: left;
+  white-space: normal;
+}
+
+.palette-block-dot {
+  flex: 0 0 auto;
+  margin-top: 2px;
 }
 
 .canvas-minimap {
