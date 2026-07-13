@@ -241,6 +241,7 @@ export default function RobotHMI() {
   const importInputRef = useRef(null);
   const tapRef = useRef({ startX: 0, startY: 0, startTime: 0, nodeId: null });
   const touchGestureRef = useRef(null);
+  const safariGestureRef = useRef(null);
   const { toasts, add: toast } = useToasts();
   const [amr, setAmr] = useAMRSim(missionRunning);
 
@@ -382,6 +383,7 @@ export default function RobotHMI() {
 
   const onWheel = useCallback((e) => {
     e.preventDefault();
+    e.stopPropagation?.();
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     if (e.ctrlKey) {
@@ -437,6 +439,94 @@ export default function RobotHMI() {
     touchGestureRef.current = null;
     setIsPanning(false);
   }, []);
+
+  useEffect(() => {
+    const element = canvasRef.current;
+    if (!element) return;
+
+    const handleWheel = (event) => {
+      onWheel(event);
+    };
+
+    const getGesturePoint = (event, rect) => ({
+      x: Number.isFinite(event.clientX) && event.clientX > 0 ? event.clientX : rect.left + rect.width / 2,
+      y: Number.isFinite(event.clientY) && event.clientY > 0 ? event.clientY : rect.top + rect.height / 2,
+    });
+
+    const handleGestureStart = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = element.getBoundingClientRect();
+      const point = getGesturePoint(event, rect);
+      safariGestureRef.current = {
+        startZoom: zoom,
+        worldCenter: toCanvas(point.x, point.y),
+        point,
+      };
+    };
+
+    const handleGestureChange = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const gesture = safariGestureRef.current;
+      if (!gesture) return;
+      const rect = element.getBoundingClientRect();
+      const point = getGesturePoint(event, rect);
+      const scale = typeof event.scale === "number" ? event.scale : 1;
+      const newZoom = clamp(gesture.startZoom * scale, MIN_ZOOM, MAX_ZOOM);
+      setZoom(newZoom);
+      setPan({
+        x: point.x - rect.left - gesture.worldCenter.x * newZoom,
+        y: point.y - rect.top - gesture.worldCenter.y * newZoom,
+      });
+    };
+
+    const handleGestureEnd = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      safariGestureRef.current = null;
+    };
+
+    element.addEventListener("wheel", handleWheel, { passive: false });
+    element.addEventListener("gesturestart", handleGestureStart, { passive: false });
+    element.addEventListener("gesturechange", handleGestureChange, { passive: false });
+    element.addEventListener("gestureend", handleGestureEnd, { passive: false });
+
+    return () => {
+      element.removeEventListener("wheel", handleWheel);
+      element.removeEventListener("gesturestart", handleGestureStart);
+      element.removeEventListener("gesturechange", handleGestureChange);
+      element.removeEventListener("gestureend", handleGestureEnd);
+    };
+  }, [onWheel, toCanvas, zoom]);
+
+  useEffect(() => {
+    if (!isLoggedIn) return;
+
+    const isInsideCanvas = (target) => Boolean(canvasRef.current?.contains(target));
+    const preventPagePinch = (event) => {
+      if (!event.ctrlKey || isInsideCanvas(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    const preventPageGesture = (event) => {
+      if (isInsideCanvas(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    window.addEventListener("wheel", preventPagePinch, { passive: false, capture: true });
+    window.addEventListener("gesturestart", preventPageGesture, { passive: false, capture: true });
+    window.addEventListener("gesturechange", preventPageGesture, { passive: false, capture: true });
+    window.addEventListener("gestureend", preventPageGesture, { passive: false, capture: true });
+
+    return () => {
+      window.removeEventListener("wheel", preventPagePinch, { capture: true });
+      window.removeEventListener("gesturestart", preventPageGesture, { capture: true });
+      window.removeEventListener("gesturechange", preventPageGesture, { capture: true });
+      window.removeEventListener("gestureend", preventPageGesture, { capture: true });
+    };
+  }, [isLoggedIn]);
 
   // ── Drag from palette ──
   const onPaletteDragStart = useCallback((e, type) => {
@@ -1186,7 +1276,6 @@ export default function RobotHMI() {
           onMouseMove={onMouseMove}
           onMouseUp={onMouseUp}
           onMouseDown={onCanvasMouseDown}
-          onWheel={onWheel}
           onTouchStart={onCanvasTouchStart}
           onTouchMove={onCanvasTouchMove}
           onTouchEnd={onCanvasTouchEnd}
