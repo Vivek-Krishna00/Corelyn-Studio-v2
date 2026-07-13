@@ -193,6 +193,7 @@ export default function RobotHMI() {
   const [deployModalOpen, setDeployModalOpen] = useState(false);
   const [backendOnline, setBackendOnline] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState(DEFAULT_EXPANDED_CATEGORIES);
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
 
   const canvasRef = useRef(null);
   const importInputRef = useRef(null);
@@ -687,6 +688,26 @@ export default function RobotHMI() {
     mql.addEventListener("change", handler);
     handler(mql);
     return () => mql.removeEventListener("change", handler);
+  }, []);
+
+  useEffect(() => {
+    const element = canvasRef.current;
+    if (!element) return;
+
+    const updateSize = () => {
+      const rect = element.getBoundingClientRect();
+      setCanvasSize({ width: rect.width, height: rect.height });
+    };
+
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(element);
+    window.addEventListener("resize", updateSize);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updateSize);
+    };
   }, []);
 
   // ── Backend health check ──
@@ -1201,6 +1222,14 @@ export default function RobotHMI() {
             ))}
           </div>
 
+          <CanvasMiniMap
+            nodes={flow.nodes}
+            selected={selected}
+            pan={pan}
+            zoom={zoom}
+            canvasSize={canvasSize}
+          />
+
           {/* Hint bar */}
           <div style={{ position: "absolute", bottom: 56, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 10, pointerEvents: "none" }}>
             {connectionState.isSelectingTarget && (
@@ -1406,5 +1435,72 @@ function NodePalette({ expandedCategories, onToggleCategory, onPaletteDragStart,
         })}
       </div>
     </>
+  );
+}
+
+function CanvasMiniMap({ nodes, selected, pan, zoom, canvasSize }) {
+  if (!nodes.length || canvasSize.width <= 0 || canvasSize.height <= 0) return null;
+
+  const width = 168;
+  const height = 108;
+  const viewport = {
+    x: -pan.x / zoom,
+    y: -pan.y / zoom,
+    width: canvasSize.width / zoom,
+    height: canvasSize.height / zoom,
+  };
+
+  const pad = 160;
+  const minX = Math.min(...nodes.map(node => node.x), viewport.x) - pad;
+  const minY = Math.min(...nodes.map(node => node.y), viewport.y) - pad;
+  const maxX = Math.max(...nodes.map(node => node.x + NODE_W), viewport.x + viewport.width) + pad;
+  const maxY = Math.max(...nodes.map(node => node.y + NODE_H), viewport.y + viewport.height) + pad;
+  const worldW = Math.max(1, maxX - minX);
+  const worldH = Math.max(1, maxY - minY);
+  const scale = Math.min(width / worldW, height / worldH);
+  const offsetX = (width - worldW * scale) / 2;
+  const offsetY = (height - worldH * scale) / 2;
+
+  const mapRect = (rect) => ({
+    x: offsetX + (rect.x - minX) * scale,
+    y: offsetY + (rect.y - minY) * scale,
+    width: rect.width * scale,
+    height: rect.height * scale,
+  });
+
+  const viewportRect = mapRect(viewport);
+
+  return (
+    <div className="canvas-minimap" aria-hidden="true">
+      <svg viewBox={`0 0 ${width} ${height}`} width={width} height={height}>
+        <rect x="0" y="0" width={width} height={height} rx="12" fill="rgba(7,10,14,0.92)" />
+        {nodes.map(node => {
+          const def = getNodeDef(node.type);
+          const rect = mapRect({ x: node.x, y: node.y, width: NODE_W, height: NODE_H });
+          return (
+            <rect
+              key={node.id}
+              x={rect.x}
+              y={rect.y}
+              width={Math.max(5, rect.width)}
+              height={Math.max(4, rect.height)}
+              rx="2"
+              fill={def?.color || "#3b82f6"}
+              opacity={selected === node.id ? "1" : "0.78"}
+            />
+          );
+        })}
+        <rect
+          x={viewportRect.x}
+          y={viewportRect.y}
+          width={viewportRect.width}
+          height={viewportRect.height}
+          rx="4"
+          fill="rgba(56,189,248,0.08)"
+          stroke="#38bdf8"
+          strokeWidth="1.4"
+        />
+      </svg>
+    </div>
   );
 }
