@@ -14,3 +14,4 @@
 - 11: typography and spacing pass on the wireframes
 - 11: minimap and zoom pill placement notes
 - 14: deploy modal states sketch: idle, deploying, done, failed
+- 15: mission run lifecycle notes
