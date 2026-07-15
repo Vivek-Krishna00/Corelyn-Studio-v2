@@ -16,3 +16,4 @@
 - 14: deploy modal states sketch: idle, deploying, done, failed
 - 15: mission run lifecycle notes
 - 15: robot link honesty states: connected, degraded, absent
+- 15: e2e testing approach with playwright
