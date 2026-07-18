@@ -18,3 +18,4 @@
 - 15: robot link honesty states: connected, degraded, absent
 - 15: e2e testing approach with playwright
 - 16: settings panel layout notes
+- 18: responsive breakpoints plan for narrow windows
