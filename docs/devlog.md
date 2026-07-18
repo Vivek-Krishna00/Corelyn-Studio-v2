@@ -19,3 +19,4 @@
 - 15: e2e testing approach with playwright
 - 16: settings panel layout notes
 - 18: responsive breakpoints plan for narrow windows
+- 18: window floor experiments around 700x550
