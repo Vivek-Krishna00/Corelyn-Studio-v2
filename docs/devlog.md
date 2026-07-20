@@ -21,3 +21,4 @@
 - 18: responsive breakpoints plan for narrow windows
 - 18: window floor experiments around 700x550
 - 20: overflow menu behaviour notes
+- 20: drawer interaction and backdrop rules
