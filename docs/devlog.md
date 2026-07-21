@@ -22,3 +22,4 @@
 - 18: window floor experiments around 700x550
 - 20: overflow menu behaviour notes
 - 20: drawer interaction and backdrop rules
+- 21: final polish checklist for the redesign branch
