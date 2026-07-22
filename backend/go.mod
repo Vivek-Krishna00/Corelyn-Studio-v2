@@ -5,6 +5,7 @@ go 1.26
 require (
 	corelynstudio/shared v0.0.0
 	modernc.org/sqlite v1.33.1
+	nhooyr.io/websocket v1.8.17
 )
 
 require (
@@ -21,7 +22,6 @@ require (
 	modernc.org/memory v1.8.0 // indirect
 	modernc.org/strutil v1.2.0 // indirect
 	modernc.org/token v1.1.0 // indirect
-	nhooyr.io/websocket v1.8.17 // indirect
 )
 
 replace corelynstudio/shared => ../shared
