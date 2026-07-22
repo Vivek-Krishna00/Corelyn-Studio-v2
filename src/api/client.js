@@ -10,12 +10,23 @@ const port = typeof window !== "undefined" ? window.corelyn?.apiPort : null;
 export const BASE_URL = port ? `http://127.0.0.1:${port}` : "http://localhost:8000";
 const WS_URL = BASE_URL.replace(/^http/, "ws");
 
+// The session token, held in memory only. Persisting it would outlive the
+// window that earned it, and the daemon is a sidecar with the same lifetime as
+// the app — there is nothing to survive.
+let sessionToken = null;
+
+export const setSessionToken = (token) => { sessionToken = token; };
+
+function authHeaders() {
+  return sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {};
+}
+
 // Non-2xx responses carry {"detail": "..."} and the UI shows it verbatim
 // (spec §4.2), so unwrap it here rather than at every call site.
 async function post(path, body) {
   const res = await fetch(`${BASE_URL}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -34,6 +45,26 @@ export async function health() {
 export const deploy = (spec) => post("/api/deploy", spec);
 
 export const cancel = () => post("/api/deploy", { mission_id: "__cancel__", command: "cancel" });
+
+// Auth. login and signup both return a session and start using it; signup only
+// succeeds while the install has no accounts (backend/internal/api/auth_http.go).
+async function startSession(path, email, password) {
+  const { token } = await post(path, { email, password });
+  setSessionToken(token);
+  return token;
+}
+
+export const login = (email, password) => startSession("/api/auth/login", email, password);
+export const signup = (email, password) => startSession("/api/auth/signup", email, password);
+
+export async function logout() {
+  try {
+    await post("/api/auth/logout", {});
+  } finally {
+    // Whatever the daemon says, this window is done with the token.
+    setSessionToken(null);
+  }
+}
 
 // Subscribes to mission status. Frames missing either field are dropped;
 // the socket reconnects 3s after any close, indefinitely (spec §4.3).

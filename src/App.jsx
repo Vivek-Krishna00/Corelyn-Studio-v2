@@ -1349,7 +1349,7 @@ export default function RobotHMI() {
             setSettingsOpen(false);
             toast("Editor preferences saved", "success");
           }}
-          onSignOut={() => setIsLoggedIn(false)}
+          onSignOut={() => { api.logout(); setIsLoggedIn(false); }}
         />
       )}
 

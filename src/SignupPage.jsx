@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import * as api from "./api/client";
 
 const keyframes = `
 @keyframes signupFadeIn { from { opacity:0; transform:translateY(12px) } to { opacity:1; transform:translateY(0) } }
@@ -203,11 +204,18 @@ export default function SignupPage({ onSignup, onSwitchToLogin }) {
     if (!name.trim()) { setError("Enter your full name"); return; }
     if (!email.trim()) { setError("Enter your email address"); return; }
     if (!password) { setError("Enter a password"); return; }
-    if (password.length < 6) { setError("Password must be at least 6 characters"); return; }
+    if (password.length < 10) { setError("Password must be at least 10 characters"); return; }
     if (password !== confirmPassword) { setError("Passwords do not match"); return; }
     setLoading(true);
-    await new Promise(r => setTimeout(r, 600));
-    onSignup();
+    try {
+      await api.signup(email.trim(), password);
+      onSignup();
+    } catch (err) {
+      // Includes "registration is closed" once an account exists — this form
+      // creates the first one only.
+      setError(err.message);
+      setLoading(false);
+    }
   };
 
   const inputBase = {
@@ -463,7 +471,7 @@ export default function SignupPage({ onSignup, onSwitchToLogin }) {
                   type="password"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
-                  placeholder="Min. 6 characters"
+                  placeholder="Min. 10 characters"
                   disabled={loading}
                   onFocus={() => setFocused("password")}
                   onBlur={() => setFocused(null)}

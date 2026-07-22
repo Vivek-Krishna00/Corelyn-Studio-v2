@@ -9,6 +9,10 @@ import { fileURLToPath } from "node:url";
 export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const mockbotBin = path.join(repoRoot, "backend", "corelyn-mockbot");
 
+// The account every test signs in as. The password clears the daemon's
+// 10-character minimum.
+export const OPERATOR = { email: "operator@corelyn.test", password: "e2e-password" };
+
 export function freePort() {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
@@ -78,8 +82,19 @@ export async function launchApp(rosbridgeUrl, { deterministic = false } = {}) {
     await page.reload();
     await page.waitForFunction(() => Date.now() === Date.UTC(2026, 0, 1, 9, 30, 0));
   }
-  await page.getByPlaceholder("you@company.com").fill("operator@corelyn.test");
-  await page.getByPlaceholder("Enter your password").fill("e2e-password");
+  // Each test gets a fresh userData dir, so every daemon starts with an empty
+  // users table and first-run signup is open. Claim it over HTTP rather than
+  // driving the four-field form on every launch — signup.spec.js covers that.
+  const apiPort = await page.evaluate(() => window.corelyn?.apiPort);
+  const created = await fetch(`http://127.0.0.1:${apiPort}/api/auth/signup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(OPERATOR),
+  });
+  if (!created.ok) throw new Error(`signup failed: ${created.status} ${await created.text()}`);
+
+  await page.getByPlaceholder("you@company.com").fill(OPERATOR.email);
+  await page.getByPlaceholder("Enter your password").fill(OPERATOR.password);
   await page.getByRole("button", { name: "Sign In" }).click();
   await expect(page.getByText(/system blocks/i)).toBeVisible();
   await expect(page.getByText("API ONLINE")).toBeVisible();

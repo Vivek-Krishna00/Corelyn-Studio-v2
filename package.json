@@ -21,7 +21,7 @@
     "electron:build:mac": "vite build && electron-builder --mac",
     "electron:build:win": "vite build && electron-builder --win",
     "electron:build:linux": "vite build && electron-builder --linux",
-    "test:e2e": "vite build && playwright test"
+    "test:e2e": "make -C backend dev && vite build && playwright test"
   },
   "dependencies": {
     "react": "^19.2.6",

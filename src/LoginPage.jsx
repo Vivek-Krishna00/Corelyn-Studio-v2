@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import * as api from "./api/client";
 
 const styles = {};
 
@@ -263,8 +264,15 @@ export default function LoginPage({ onLogin, onSwitchToSignup }) {
     if (!email.trim()) { setError("Enter your email address"); return; }
     if (!password) { setError("Enter your password"); return; }
     setLoading(true);
-    await new Promise(r => setTimeout(r, 600));
-    onLogin();
+    try {
+      await api.login(email.trim(), password);
+      onLogin();
+    } catch (err) {
+      // The daemon returns the same message whether the address is unknown or
+      // the password is wrong — show it as-is rather than guessing which.
+      setError(err.message);
+      setLoading(false);
+    }
   };
 
   const inputBase = {
