@@ -60,6 +60,7 @@ func New(deps Deps) *Server {
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("POST /api/deploy", s.handleDeploy)
 	mux.HandleFunc("/ws/mission/status", s.handleStatusWS)
+	mux.HandleFunc("POST /api/auth/signup", s.handleSignup)
 	mux.HandleFunc("POST /api/auth/login", s.handleLogin)
 	mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/auth/session", s.handleSession)

@@ -106,6 +106,16 @@ func (s *Store) CreateUser(email, passwordHash, role string) (int64, error) {
 	return res.LastInsertId()
 }
 
+// HasUsers reports whether any account exists. Signup is a first-run
+// bootstrap and closes once this is true.
+func (s *Store) HasUsers() (bool, error) {
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&n); err != nil {
+		return false, fmt.Errorf("count users: %w", err)
+	}
+	return n > 0, nil
+}
+
 // UserByEmail returns the id, password hash, and role for email.
 func (s *Store) UserByEmail(email string) (id int64, passwordHash, role string, err error) {
 	err = s.db.QueryRow(

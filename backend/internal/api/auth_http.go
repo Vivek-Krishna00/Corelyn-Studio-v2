@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -56,6 +57,72 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.deps.Store.InsertAuditLog(&userID, "login", req.Email)
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"token":      token,
+		"expires_at": time.Now().UTC().Add(sessionTTL).Format(time.RFC3339),
+	})
+}
+
+// minPasswordLen is the shortest password signup accepts. Deliberately modest
+// — argon2id carries the cost of a weak one, and a length rule the operator
+// works around with "Password1!" buys nothing.
+const minPasswordLen = 10
+
+// handleSignup creates the first account and closes. This is a single-site
+// desktop tool with no invite flow: leaving registration open would let any
+// process that can reach loopback mint an operator who can deploy missions,
+// and there is nobody to notice. Later accounts are an admin's job.
+func (s *Server) handleSignup(w http.ResponseWriter, r *http.Request) {
+	var req loginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "malformed JSON body: "+err.Error())
+		return
+	}
+
+	email := strings.TrimSpace(req.Email)
+	if email == "" || !strings.Contains(email, "@") {
+		writeError(w, http.StatusBadRequest, "a valid email address is required")
+		return
+	}
+	if len(req.Password) < minPasswordLen {
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("password must be at least %d characters", minPasswordLen))
+		return
+	}
+
+	taken, err := s.deps.Store.HasUsers()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "check existing users: "+err.Error())
+		return
+	}
+	if taken {
+		writeError(w, http.StatusConflict,
+			"registration is closed; ask an administrator for an account")
+		return
+	}
+
+	hash, err := auth.HashPassword(req.Password)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "hash password: "+err.Error())
+		return
+	}
+
+	// First account owns the install.
+	userID, err := s.deps.Store.CreateUser(email, hash, "admin")
+	if err != nil {
+		// A racing signup loses the UNIQUE(email) insert rather than creating
+		// a second owner.
+		writeError(w, http.StatusConflict, "registration is closed; ask an administrator for an account")
+		return
+	}
+
+	token, err := s.auth.IssueSession(userID, sessionTTL)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "issue session: "+err.Error())
+		return
+	}
+	s.deps.Store.InsertAuditLog(&userID, "signup", email)
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"token":      token,

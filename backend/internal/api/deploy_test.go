@@ -114,3 +114,73 @@ func TestDeployValidationErrorNamesNodeAndField(t *testing.T) {
 		t.Errorf("detail = %q, want it to name node %q and field %q", detail, "a", "distance")
 	}
 }
+
+// PRD §16 wants every control action attributable. Deploy and cancel are
+// allowed without a session (see Server.actor), so what is asserted here is
+// that the row is always written, and carries the user whenever one is known.
+func TestDeployAndCancelAreAudited(t *testing.T) {
+	srv := newTestServer(t)
+	spec, err := os.ReadFile("../../../shared/testdata/single_start.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	userID := createTestUser(t, srv, "operator@example.com", "correct-horse")
+	login := httptest.NewRecorder()
+	srv.ServeHTTP(login, httptest.NewRequest("POST", "/api/auth/login",
+		strings.NewReader(`{"email":"operator@example.com","password":"correct-horse"}`)))
+	var session map[string]string
+	json.Unmarshal(login.Body.Bytes(), &session)
+
+	deploy := httptest.NewRequest("POST", "/api/deploy", strings.NewReader(string(spec)))
+	deploy.Header.Set("Authorization", "Bearer "+session["token"])
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, deploy)
+	if rec.Code != 200 {
+		t.Fatalf("deploy failed: %d %s", rec.Code, rec.Body)
+	}
+
+	cancel := httptest.NewRequest("POST", "/api/deploy",
+		strings.NewReader(`{"mission_id":"__cancel__","command":"cancel"}`))
+	cancel.Header.Set("Authorization", "Bearer "+session["token"])
+	srv.ServeHTTP(httptest.NewRecorder(), cancel)
+
+	for _, action := range []string{"deploy", "cancel"} {
+		var n int
+		err := srv.deps.Store.DB().QueryRow(
+			`SELECT count(*) FROM audit_log WHERE action = ? AND user_id = ?`, action, userID).Scan(&n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != 1 {
+			t.Errorf("audit_log rows for %s by user %d = %d, want 1", action, userID, n)
+		}
+	}
+}
+
+// An expired or missing token must not stop the robot being stopped. The
+// action still happens and is still logged — with no actor against it.
+func TestUnauthenticatedDeployIsLoggedWithoutAnActor(t *testing.T) {
+	srv := newTestServer(t)
+	spec, err := os.ReadFile("../../../shared/testdata/single_start.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/deploy", strings.NewReader(string(spec)))
+	req.Header.Set("Authorization", "Bearer not-a-real-token")
+	srv.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("deploy without a session was refused: %d %s", rec.Code, rec.Body)
+	}
+
+	var n int
+	if err := srv.deps.Store.DB().QueryRow(
+		`SELECT count(*) FROM audit_log WHERE action = 'deploy' AND user_id IS NULL`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("unattributed deploy rows = %d, want 1", n)
+	}
+}

@@ -21,6 +21,23 @@ type cancelEnvelope struct {
 // flow yet — that's Task B8 — so every deploy versions under this one row.
 const defaultProgramName = "canvas"
 
+// actor returns the user id behind a request, or nil when the caller sent no
+// session. Deploy and cancel are allowed either way — a control action must
+// not become impossible because a token expired — so an unattributed row is
+// recorded rather than the action refused. That is a deliberate hole in PRD
+// §16's "100% attribution"; closing it means requiring auth here.
+func (s *Server) actor(r *http.Request) *int64 {
+	token := bearerToken(r)
+	if token == "" {
+		return nil
+	}
+	sess, err := s.auth.VerifySession(token)
+	if err != nil {
+		return nil
+	}
+	return &sess.UserID
+}
+
 func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -35,7 +52,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if env.MissionID == "__cancel__" && env.Command == "cancel" {
-		s.cancelActive(w)
+		s.cancelActive(w, s.actor(r))
 		return
 	}
 
@@ -107,13 +124,15 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	s.deps.Store.InsertAuditLog(s.actor(r), "deploy", spec.MissionID)
+
 	writeJSON(w, http.StatusOK, map[string]string{"mission_id": spec.MissionID, "status": "deployed"})
 }
 
 // cancelActive ends whatever mission is running. Cancelling with nothing
 // active is not an error — the client sends the same envelope regardless of
 // whether it believes a mission is running.
-func (s *Server) cancelActive(w http.ResponseWriter) {
+func (s *Server) cancelActive(w http.ResponseWriter, actor *int64) {
 	s.mu.Lock()
 	run := s.active
 	s.active = nil
@@ -124,6 +143,7 @@ func (s *Server) cancelActive(w http.ResponseWriter) {
 			writeError(w, http.StatusInternalServerError, "persist cancellation: "+err.Error())
 			return
 		}
+		s.deps.Store.InsertAuditLog(actor, "cancel", run.missionID)
 		s.hub.broadcast("__mission__", "cancelled")
 	}
 
