@@ -13,6 +13,20 @@ const keyframes = `
 @keyframes signupRadarSweep { from { transform:rotate(-45deg) } to { transform:rotate(315deg) } }
 @keyframes signupPathDraw { to { stroke-dashoffset:0 } }
 @keyframes signupJointOscillate { from { transform:rotate(-25deg) } to { transform:rotate(25deg) } }
+
+/* See LoginPage.jsx's matching block: below 700px tall, trim the centered
+   layout's paddings/margins and let the shell scroll as a fallback so the
+   four-field form and its submit button stay reachable. */
+@media (max-height: 699px) {
+  .signup-shell { overflow-y: auto !important; }
+  .signup-content { padding: 16px 24px !important; align-items: flex-start !important; }
+  .signup-card { padding: 18px 28px !important; }
+  .signup-header { margin-bottom: 12px !important; }
+  .signup-social-top { margin-bottom: 10px !important; }
+  .signup-divider { margin-bottom: 10px !important; }
+  .signup-field { margin-bottom: 8px !important; }
+  .signup-trust { display: none !important; }
+}
 `;
 
 const sheet = typeof document !== "undefined" ? (() => {
@@ -240,7 +254,7 @@ export default function SignupPage({ onSignup, onSwitchToLogin }) {
   });
 
   return (
-    <div style={{
+    <div className="signup-shell" style={{
       minHeight: "100vh", width: "100vw",
       background: "#1e1e1e",
       fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
@@ -286,7 +300,7 @@ export default function SignupPage({ onSignup, onSwitchToLogin }) {
       <MechanicalJoint />
 
       {/* CONTENT */}
-      <div style={{
+      <div className="signup-content" style={{
         position: "relative", zIndex: 1,
         display: "flex", width: "100%", maxWidth: 1280,
         margin: "0 auto", padding: "40px 48px",
@@ -357,7 +371,7 @@ export default function SignupPage({ onSignup, onSwitchToLogin }) {
           animation: loaded ? "signupFadeUp 0.8s cubic-bezier(0.16,1,0.3,1) 0.15s both" : "none",
         }}>
           {/* Glass card */}
-          <div style={{
+          <div className="signup-card" style={{
             background: "rgba(255,255,255,0.03)",
             backdropFilter: "blur(24px)",
             WebkitBackdropFilter: "blur(24px)",
@@ -376,13 +390,13 @@ export default function SignupPage({ onSignup, onSwitchToLogin }) {
             }} />
 
             {/* Header */}
-            <div style={{ marginBottom: 24, position: "relative" }}>
+            <div className="signup-header" style={{ marginBottom: 24, position: "relative" }}>
               <div style={{ fontSize: 22, fontWeight: 700, color: "#fff", marginBottom: 4, letterSpacing: "-0.02em" }}>Create account</div>
               <div style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", lineHeight: 1.5 }}>Sign up to get started.</div>
             </div>
 
             {/* Social signup */}
-            <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
+            <div className="signup-social-top" style={{ display: "flex", gap: 12, marginBottom: 20 }}>
               {[
                 {
                   label: "Google",
@@ -423,7 +437,7 @@ export default function SignupPage({ onSignup, onSwitchToLogin }) {
             </div>
 
             {/* Divider */}
-            <div style={{
+            <div className="signup-divider" style={{
               display: "flex", alignItems: "center", gap: 16, marginBottom: 20,
             }}>
               <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.06)" }} />
@@ -434,7 +448,7 @@ export default function SignupPage({ onSignup, onSwitchToLogin }) {
             {/* Form */}
             <form onSubmit={handleSubmit} style={{ position: "relative" }}>
               {/* Full Name */}
-              <div style={{ marginBottom: 16 }}>
+              <div className="signup-field" style={{ marginBottom: 16 }}>
                 <label style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 600, display: "block", marginBottom: 6, letterSpacing: "0.05em" }}>FULL NAME</label>
                 <input
                   ref={nameRef}
@@ -450,7 +464,7 @@ export default function SignupPage({ onSignup, onSwitchToLogin }) {
               </div>
 
               {/* Email */}
-              <div style={{ marginBottom: 16 }}>
+              <div className="signup-field" style={{ marginBottom: 16 }}>
                 <label style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 600, display: "block", marginBottom: 6, letterSpacing: "0.05em" }}>EMAIL</label>
                 <input
                   type="email"
@@ -465,7 +479,7 @@ export default function SignupPage({ onSignup, onSwitchToLogin }) {
               </div>
 
               {/* Password */}
-              <div style={{ marginBottom: 16 }}>
+              <div className="signup-field" style={{ marginBottom: 16 }}>
                 <label style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 600, display: "block", marginBottom: 6, letterSpacing: "0.05em" }}>PASSWORD</label>
                 <input
                   type="password"
@@ -480,7 +494,7 @@ export default function SignupPage({ onSignup, onSwitchToLogin }) {
               </div>
 
               {/* Confirm Password */}
-              <div style={{ marginBottom: 20 }}>
+              <div className="signup-field" style={{ marginBottom: 20 }}>
                 <label style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 600, display: "block", marginBottom: 6, letterSpacing: "0.05em" }}>CONFIRM PASSWORD</label>
                 <input
                   type="password"
@@ -591,7 +605,7 @@ export default function SignupPage({ onSignup, onSwitchToLogin }) {
           </div>
 
           {/* Trust indicators */}
-          <div style={{
+          <div className="signup-trust" style={{
             display: "flex", alignItems: "center", justifyContent: "center", gap: 24,
             marginTop: 20, opacity: 0.15,
             animation: loaded ? "signupFadeIn 0.8s ease 0.6s both" : "none",

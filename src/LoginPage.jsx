@@ -26,6 +26,21 @@ const keyframes = `
 @keyframes loginSignalBar { 0% { transform:scaleY(0.4) } 50% { transform:scaleY(1) } 100% { transform:scaleY(0.4) } }
 @keyframes loginJointOscillate { from { transform:rotate(-25deg) } to { transform:rotate(25deg) } }
 @keyframes loginDataPulse { 0%,100% { opacity:0.15; transform:scale(1) } 50% { opacity:0.4; transform:scale(1.15) } }
+
+/* Below 700px tall (the window floor's shorter edge), the centered layout's
+   fixed paddings/margins add up to more than the viewport — trim them and
+   let the shell scroll as a fallback so the form and its submit button stay
+   reachable instead of getting clipped by the shell's overflow:hidden. */
+@media (max-height: 699px) {
+  .login-shell { overflow-y: auto !important; }
+  .login-content { padding: 16px 24px !important; align-items: flex-start !important; }
+  .login-card { padding: 18px 28px !important; }
+  .login-card-header { margin-bottom: 12px !important; }
+  .login-field { margin-bottom: 10px !important; }
+  .login-divider { margin: 10px 0 !important; }
+  .login-social { margin-bottom: 10px !important; }
+  .login-trust { display: none !important; }
+}
 `;
 
 /* ──────────────────────────────────────────────────────────────────────────────
@@ -295,7 +310,7 @@ export default function LoginPage({ onLogin, onSwitchToSignup }) {
   };
 
   return (
-    <div style={{
+    <div className="login-shell" style={{
       minHeight: "100vh", width: "100vw",
       background: "#1e1e1e",
       fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
@@ -344,7 +359,7 @@ export default function LoginPage({ onLogin, onSwitchToSignup }) {
       <MechanicalJoint />
 
       {/* ── CONTENT ── */}
-      <div style={{
+      <div className="login-content" style={{
         position: "relative", zIndex: 1,
         display: "flex", width: "100%", maxWidth: 1280,
         margin: "0 auto", padding: "40px 48px",
@@ -415,7 +430,7 @@ export default function LoginPage({ onLogin, onSwitchToSignup }) {
           animation: loaded ? "loginFadeUp 0.8s cubic-bezier(0.16,1,0.3,1) 0.15s both" : "none",
         }}>
           {/* Glass card */}
-          <div style={{
+          <div className="login-card" style={{
             background: "rgba(255,255,255,0.03)",
             backdropFilter: "blur(24px)",
             WebkitBackdropFilter: "blur(24px)",
@@ -434,7 +449,7 @@ export default function LoginPage({ onLogin, onSwitchToSignup }) {
             }} />
 
             {/* Header */}
-            <div style={{ marginBottom: 28, position: "relative" }}>
+            <div className="login-card-header" style={{ marginBottom: 28, position: "relative" }}>
               <div style={{ fontSize: 22, fontWeight: 700, color: "#fff", marginBottom: 6, letterSpacing: "-0.02em" }}>Welcome back</div>
               <div style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", lineHeight: 1.5 }}>Sign in to your account to continue.</div>
             </div>
@@ -442,7 +457,7 @@ export default function LoginPage({ onLogin, onSwitchToSignup }) {
             {/* Form */}
             <form onSubmit={handleSubmit} style={{ position: "relative" }}>
               {/* Email */}
-              <div style={{ marginBottom: 18 }}>
+              <div className="login-field" style={{ marginBottom: 18 }}>
                 <label style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 600, display: "block", marginBottom: 7, letterSpacing: "0.05em" }}>EMAIL</label>
                 <input
                   ref={emailRef}
@@ -465,7 +480,7 @@ export default function LoginPage({ onLogin, onSwitchToSignup }) {
               </div>
 
               {/* Password */}
-              <div style={{ marginBottom: 24 }}>
+              <div className="login-field" style={{ marginBottom: 24 }}>
                 <label style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 600, display: "block", marginBottom: 7, letterSpacing: "0.05em" }}>PASSWORD</label>
                 <input
                   type="password"
@@ -568,7 +583,7 @@ export default function LoginPage({ onLogin, onSwitchToSignup }) {
             </form>
 
               {/* ── Social divider ── */}
-              <div style={{
+              <div className="login-divider" style={{
                 display: "flex", alignItems: "center", gap: 16, margin: "20px 0 18px",
               }}>
                 <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.06)" }} />
@@ -577,7 +592,7 @@ export default function LoginPage({ onLogin, onSwitchToSignup }) {
               </div>
 
               {/* ── Social buttons ── */}
-              <div style={{ display: "flex", gap: 12, marginBottom: 22 }}>
+              <div className="login-social" style={{ display: "flex", gap: 12, marginBottom: 22 }}>
                 {[
                   {
                     label: "Google",
@@ -636,7 +651,7 @@ export default function LoginPage({ onLogin, onSwitchToSignup }) {
           </div>
 
           {/* Trust indicators */}
-          <div style={{
+          <div className="login-trust" style={{
             display: "flex", alignItems: "center", justifyContent: "center", gap: 24,
             marginTop: 24, opacity: 0.2,
             animation: loaded ? "loginFadeIn 0.8s ease 0.6s both" : "none",

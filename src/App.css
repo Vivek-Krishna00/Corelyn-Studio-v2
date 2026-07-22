@@ -886,7 +886,12 @@ body {
   }
   .settings-panel {
     grid-template-columns: 1fr;
-    max-height: none;
+    /* Was `none`, relying on the backdrop's align-items:stretch (below) plus
+       this panel's own overflow:hidden to floor its automatic min-size at 0
+       — which does bound it to the backdrop's height, but implicitly enough
+       that it's easy to break by removing either property. Same effective
+       cap, spelled out: pinned 16px above and below the viewport edge. */
+    max-height: calc(100vh - 32px);
   }
   .settings-nav {
     display: none;
