@@ -147,6 +147,7 @@ body {
 .left-sidebar {
   background: var(--panel-bg); border-right: 1px solid var(--border);
   display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden;
+  transition: transform 0.25s cubic-bezier(0.4,0,0.2,1);
 }
 
 .palette-header {
@@ -496,7 +497,7 @@ body {
 .right-panel {
   background: var(--panel-bg); display: flex; flex-direction: column;
   flex-shrink: 0; overflow: hidden;
-  transition: width 0.25s cubic-bezier(0.4,0,0.2,1), border 0.25s, opacity 0.25s;
+  transition: width 0.25s cubic-bezier(0.4,0,0.2,1), border 0.25s, opacity 0.25s, transform 0.25s cubic-bezier(0.4,0,0.2,1);
 }
 
 .settings-tab-button {
@@ -858,30 +859,12 @@ body {
 }
 
 /* ── Drawer animations ── */
-@keyframes drawerIn { from{transform:translateX(-100%)} to{transform:translateX(0)} }
-@keyframes drawerInRight { from{transform:translateX(100%)} to{transform:translateX(0)} }
 @keyframes fadeIn { from{opacity:0} to{opacity:1} }
 
-/* ── Mobile-first: below 1024px ── */
+/* ── Mobile-first: below 1024px (modals/minimap/legacy palette-item —
+   untouched by the responsive side-panel work, which owns the 999px tier
+   below instead) ── */
 @media (max-width: 1023px) {
-  .left-sidebar {
-    position: fixed; top: 0; left: 0; bottom: 0; z-index: 300;
-    width: 280px !important;
-    box-shadow: 4px 0 20px rgba(0,0,0,0.12);
-    animation: drawerIn 0.2s ease;
-  }
-  .right-panel {
-    position: fixed; top: 0; right: 0; bottom: 0; z-index: 300;
-    width: 300px !important;
-    box-shadow: -4px 0 20px rgba(0,0,0,0.12);
-    animation: drawerInRight 0.2s ease;
-    border-left: 1px solid var(--border) !important;
-    opacity: 1 !important;
-  }
-  .right-panel-closed {
-    transform: translateX(100%);
-    pointer-events: none;
-  }
   .palette-item {
     padding: 10px 16px !important;
     min-height: 44px;
@@ -896,12 +879,7 @@ body {
   .canvas-minimap {
     display: none;
   }
-  .right-panel-toggle {
-    display: none;
-  }
   .zoom-controls { bottom: 24px !important; }
-  .topbar-desktop-only { display: none !important; }
-  .topbar-mobile-toggle { display: flex !important; }
   .settings-backdrop {
     align-items: stretch;
     padding: 12px;
@@ -928,6 +906,34 @@ body {
   .settings-actions {
     flex-direction: column;
   }
+}
+
+/* ── Side panels: narrow tier (<1000px, see useBreakpoint's
+   NARROW_MAX_WIDTH) — palette and right panel both become overlay drawers
+   over the canvas. The chevron (.right-panel-toggle) stays visible here and
+   doubles as the drawer's open/close control. ── */
+@media (max-width: 999px) {
+  .left-sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: 300;
+    width: 280px !important;
+    box-shadow: 4px 0 20px rgba(0,0,0,0.12);
+  }
+  .left-sidebar-closed {
+    transform: translateX(-100%);
+    pointer-events: none;
+  }
+  .right-panel {
+    position: fixed; top: 0; right: 0; bottom: 0; z-index: 300;
+    width: 300px !important;
+    box-shadow: -4px 0 20px rgba(0,0,0,0.12);
+    border-left: 1px solid var(--border) !important;
+    opacity: 1 !important;
+  }
+  .right-panel-closed {
+    transform: translateX(100%);
+    pointer-events: none;
+  }
+  .topbar-desktop-only { display: none !important; }
 }
 
 /* ── Top bar: compact tier (<1200px) — hide the tagline, shrink the
@@ -1019,14 +1025,24 @@ body {
   font-size: 14px;
 }
 
-/* ── Desktop: 1024px and up ── */
+/* ── Desktop: 1024px and up (unrelated to the side-panel breakpoint below) ── */
 @media (min-width: 1024px) {
+  .canvas-bg { flex: 1; }
+  .palette-item { padding: 8px 14px !important; }
+}
+
+/* ── Side panels: docked tier (≥1000px, see useBreakpoint's
+   NARROW_MAX_WIDTH) — palette floats over the canvas at a fluid width
+   (was a fixed 292px; clamp's upper bound is pinned to that same 292px so
+   the 1440px baseline renders identically), right panel docks with its
+   existing chevron-collapse behaviour. ── */
+@media (min-width: 1000px) {
   .left-sidebar-floating {
     position: absolute;
     top: 16px;
     left: 16px;
     z-index: 60;
-    width: 292px;
+    width: clamp(240px, 22vw, 292px);
     max-height: calc(100% - 32px);
     border: 1px solid rgba(255,255,255,0.1);
     border-radius: 14px;
@@ -1040,9 +1056,6 @@ body {
     border-left: 1px solid var(--border);
   }
   .drawer-backdrop { display: none !important; }
-  .topbar-mobile-toggle { display: none !important; }
-  .canvas-bg { flex: 1; }
-  .palette-item { padding: 8px 14px !important; }
 }
 
 /* ── Node touch targets ── */

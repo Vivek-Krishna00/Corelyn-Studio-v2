@@ -120,7 +120,6 @@ export default function RobotHMI() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [authPage, setAuthPage] = useState("login");
   const [connectionState, setConnectionState] = useState({ sourceNodeId: null, isSelectingTarget: false });
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [mobileRightOpen, setMobileRightOpen] = useState(false);
   const [chainMode, setChainMode] = useState(false);
@@ -134,6 +133,31 @@ export default function RobotHMI() {
   const [editorSettings, setEditorSettings] = useState(readEditorSettings);
   const [systemTheme, setSystemTheme] = useState(getSystemTheme);
   const [overflowMenuOpen, setOverflowMenuOpen] = useState(false);
+
+  // Top bar's "compact" tier — Clear/Export/Import/Run/Stop/Deploy/CHAIN go
+  // icon-only and the status pills abbreviate (needed for the row to actually
+  // fit down to 1000px; App.css handles the rest of this tier via media query).
+  const isCompact = useBreakpoint(COMPACT_MAX_WIDTH);
+  // Top bar's "narrow" tier — Clear/Export/Import/CHAIN/telemetry collapse into
+  // the ⋯ overflow menu, and both side panels become overlay drawers below
+  // this width. Single source of truth for both the top bar and the panels —
+  // replaces a second matchMedia(1023px) listener this file used to carry.
+  const isNarrow = useBreakpoint(NARROW_MAX_WIDTH);
+
+  // Both drawers start closed whenever the window crosses the narrow
+  // breakpoint, in either direction — so neither panel is left open (and
+  // undockable) after a resize.
+  useEffect(() => {
+    const closeDrawers = () => {
+      if (isNarrow) {
+        setRightPanelOpen(false);
+      } else {
+        setMobileSidebarOpen(false);
+        setMobileRightOpen(false);
+      }
+    };
+    closeDrawers();
+  }, [isNarrow]);
 
   const canvasRef = useRef(null);
   const importInputRef = useRef(null);
@@ -244,7 +268,7 @@ export default function RobotHMI() {
 
   function addNodeFromPalette(nodeType) {
     const center = getVisibleCanvasCenter();
-    addNodeToCanvas(nodeType, center, { closeMobile: isMobile });
+    addNodeToCanvas(nodeType, center, { closeMobile: isNarrow });
   }
 
   // ── Mouse handlers ──
@@ -277,7 +301,7 @@ export default function RobotHMI() {
         setSelected(ids[0] || null);
         setSelectedConn(null);
         if (ids.length === 1) {
-          if (isMobile) setMobileRightOpen(true); else setRightPanelOpen(true);
+          if (isNarrow) { setMobileRightOpen(true); } else { setRightPanelOpen(true); }
         } else {
           setMobileRightOpen(false);
           setRightPanelOpen(false);
@@ -291,7 +315,7 @@ export default function RobotHMI() {
     }
     setDraggingNode(null);
     setIsPanning(false);
-  }, [flow.nodes, isMobile, marquee]);
+  }, [flow.nodes, isNarrow, marquee]);
 
   const onCanvasMouseDown = useCallback((e) => {
     if (e.button === 1 || e.button === 0 && (e.altKey || spaceHeld)) {
@@ -596,13 +620,13 @@ export default function RobotHMI() {
     tapRef.current = { startX: e.clientX, startY: e.clientY, startTime: Date.now(), nodeId };
     setSelected(nodeId);
     setSelectedIds([nodeId]);
-    if (isMobile) setMobileRightOpen(true); else setRightPanelOpen(true);
+    if (isNarrow) { setMobileRightOpen(true); } else { setRightPanelOpen(true); }
     if (connectionState.isSelectingTarget) return;
     const node = flow.nodes.find(n => n.id === nodeId);
     if (!node) return;
     const pos = toCanvas(e.clientX, e.clientY);
     setDraggingNode({ id: nodeId, ox: pos.x - node.x, oy: pos.y - node.y });
-  }, [flow.nodes, toCanvas, connectionState.isSelectingTarget, isMobile]);
+  }, [flow.nodes, toCanvas, connectionState.isSelectingTarget, isNarrow]);
 
   const onNodeTap = useCallback((e, nodeId) => {
     const el = e.target;
@@ -642,9 +666,9 @@ export default function RobotHMI() {
     e.stopPropagation();
     setSelected(nodeId);
     setSelectedIds([nodeId]);
-    if (isMobile) setMobileRightOpen(true); else setRightPanelOpen(true);
+    if (isNarrow) { setMobileRightOpen(true); } else { setRightPanelOpen(true); }
     setRightTab("props");
-  }, [isMobile]);
+  }, [isNarrow]);
 
   // ── Mission execution → the daemon, which drives the robot (or the mockbot
   //    in DEMO MODE — same code path either way, spec §3.3) ──
@@ -809,30 +833,6 @@ export default function RobotHMI() {
   }, []);
 
   const battColor = amr.battery > 50 ? "#10b981" : amr.battery > 20 ? "#d97706" : "#dc2626";
-
-  // ── Responsive breakpoint listener ──
-  useEffect(() => {
-    const mql = window.matchMedia("(max-width: 1023px)");
-    const handler = (e) => {
-      setIsMobile(e.matches);
-      if (e.matches) {
-        setRightPanelOpen(false);
-      } else {
-        setMobileSidebarOpen(false);
-        setMobileRightOpen(false);
-      }
-    };
-    mql.addEventListener("change", handler);
-    handler(mql);
-    return () => mql.removeEventListener("change", handler);
-  }, []);
-
-  // Top bar's "compact" tier — Clear/Export/Import/Run/Stop/Deploy/CHAIN go
-  // icon-only and the status pills abbreviate (needed for the row to actually
-  // fit down to 1000px; App.css handles the rest of this tier via media query).
-  const isCompact = useBreakpoint(COMPACT_MAX_WIDTH);
-  // Top bar's "narrow" tier — Clear/Export/Import/CHAIN/telemetry collapse into the ⋯ overflow menu.
-  const isNarrow = useBreakpoint(NARROW_MAX_WIDTH);
 
   // Overflow menu closes on outside click or Escape, same convention as the settings backdrop.
   useEffect(() => {
@@ -1005,6 +1005,24 @@ export default function RobotHMI() {
           </div>
         </div>
 
+        {/* Narrow-width palette drawer toggle — lives near the brand block
+            since the palette drawer slides in from the same (left) side. */}
+        {isNarrow && (
+          <button
+            className={`settings-tab-button ${mobileSidebarOpen ? "settings-tab-button-active" : ""}`}
+            onClick={() => setMobileSidebarOpen(open => {
+              const next = !open;
+              if (next) setMobileRightOpen(false);
+              return next;
+            })}
+            title={mobileSidebarOpen ? "Close blocks panel" : "Open blocks panel"}
+            type="button"
+            aria-pressed={mobileSidebarOpen}
+          >
+            <span aria-hidden="true">☰</span>
+          </button>
+        )}
+
         {!isNarrow && (
           <>
             <div style={{ width: 1, height: 28, background: "var(--border)", margin: "0 4px" }} />
@@ -1075,16 +1093,6 @@ export default function RobotHMI() {
           {sidebarOpen ? "⟨" : "⟩"}
         </button>
 
-        {/* Mobile menu toggles */}
-        <div className="topbar-mobile-toggle" style={{ alignItems: "center", gap: 6 }}>
-          <button onClick={() => setMobileSidebarOpen(s => !s)} style={{ padding: "6px 10px", background: mobileSidebarOpen ? "var(--button-hover)" : "transparent", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-soft)", cursor: "pointer", fontSize: 14, transition: "all 0.2s" }}>
-            ☰
-          </button>
-          <button onClick={() => { if (selected) setMobileRightOpen(s => !s); }} style={{ padding: "6px 10px", background: mobileRightOpen ? "var(--button-hover)" : "transparent", border: "1px solid var(--border)", borderRadius: 6, color: selected ? "var(--text-soft)" : "var(--text-faint)", cursor: selected ? "pointer" : "default", fontSize: 14, transition: "all 0.2s" }}>
-            ⚙
-          </button>
-        </div>
-
         {/* Narrow-width overflow menu — Clear/Export/Import/CHAIN/telemetry, next to Settings */}
         {isNarrow && (
           <div className="topbar-overflow" ref={overflowMenuRef}>
@@ -1139,25 +1147,23 @@ export default function RobotHMI() {
 
       <div className="workspace-layout" style={{ display: "flex", flex: 1, overflow: "hidden" }}>
 
-        {/* ── MOBILE DRAWER BACKDROP ── */}
-        {isMobile && (mobileSidebarOpen || mobileRightOpen) && (
+        {/* ── DRAWER BACKDROP (narrow mode only) ── */}
+        {isNarrow && (mobileSidebarOpen || mobileRightOpen) && (
           <div className="drawer-backdrop" onClick={() => { setMobileSidebarOpen(false); setMobileRightOpen(false); }} />
         )}
 
         {/* ── LEFT SIDEBAR (N8N node panel) ── */}
-        {isMobile ? (
-          mobileSidebarOpen && (
-            <div className="left-sidebar">
-              <NodePalette
-                expandedCategories={expandedCategories}
-                onToggleCategory={toggleCategory}
-                onPaletteDragStart={onPaletteDragStart}
-                onAddNode={addNodeFromPalette}
-                onClose={() => setMobileSidebarOpen(false)}
-                isMobile={isMobile}
-              />
-            </div>
-          )
+        {isNarrow ? (
+          <div className={`left-sidebar ${mobileSidebarOpen ? "" : "left-sidebar-closed"}`}>
+            <NodePalette
+              expandedCategories={expandedCategories}
+              onToggleCategory={toggleCategory}
+              onPaletteDragStart={onPaletteDragStart}
+              onAddNode={addNodeFromPalette}
+              onClose={() => setMobileSidebarOpen(false)}
+              isMobile={isNarrow}
+            />
+          </div>
         ) : (
           sidebarOpen && (
             <div className="left-sidebar left-sidebar-floating">
@@ -1167,7 +1173,7 @@ export default function RobotHMI() {
                 onPaletteDragStart={onPaletteDragStart}
                 onAddNode={addNodeFromPalette}
                 onClose={() => setMobileSidebarOpen(false)}
-                isMobile={isMobile}
+                isMobile={isNarrow}
               />
             </div>
           )
@@ -1202,12 +1208,22 @@ export default function RobotHMI() {
           <button
             className="right-panel-toggle"
             type="button"
-            title={rightPanelOpen ? "Collapse node panel" : "Expand node panel"}
-            aria-label={rightPanelOpen ? "Collapse node panel" : "Expand node panel"}
-            aria-pressed={rightPanelOpen}
-            onClick={() => setRightPanelOpen(open => !open)}
+            title={(isNarrow ? mobileRightOpen : rightPanelOpen) ? "Collapse node panel" : "Expand node panel"}
+            aria-label={(isNarrow ? mobileRightOpen : rightPanelOpen) ? "Collapse node panel" : "Expand node panel"}
+            aria-pressed={isNarrow ? mobileRightOpen : rightPanelOpen}
+            onClick={() => {
+              if (isNarrow) {
+                setMobileRightOpen(open => {
+                  const next = !open;
+                  if (next) setMobileSidebarOpen(false);
+                  return next;
+                });
+              } else {
+                setRightPanelOpen(open => !open);
+              }
+            }}
           >
-            {rightPanelOpen ? "›" : "‹"}
+            {(isNarrow ? mobileRightOpen : rightPanelOpen) ? "›" : "‹"}
           </button>
 
           {/* Transform group */}
@@ -1385,7 +1401,7 @@ export default function RobotHMI() {
         </div>
 
         {/* ── RIGHT PANEL ── */}
-        {isMobile ? (
+        {isNarrow ? (
           <div className={`right-panel ${mobileRightOpen ? "" : "right-panel-closed"}`} style={{ width: mobileRightOpen ? 300 : 0 }}>
             {/* Mobile close header */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
