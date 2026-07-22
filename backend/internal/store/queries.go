@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -167,6 +168,152 @@ func (s *Store) InsertAuditLog(userID *int64, action, target string) error {
 	)
 	if err != nil {
 		return fmt.Errorf("insert audit log: %w", err)
+	}
+	return nil
+}
+
+// GetPrograms returns all programs.
+func (s *Store) GetPrograms() ([]map[string]any, error) {
+	rows, err := s.db.Query(
+		`SELECT id, name, platform, created_by, created_at, updated_at FROM programs ORDER BY id`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query programs: %w", err)
+	}
+	defer rows.Close()
+
+	var programs []map[string]any
+	for rows.Next() {
+		var id int64
+		var name, platform string
+		var createdBy *int64
+		var createdAt, updatedAt string
+
+		if err := rows.Scan(&id, &name, &platform, &createdBy, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("scan program: %w", err)
+		}
+
+		prog := map[string]any{
+			"id":         id,
+			"name":       name,
+			"platform":   platform,
+			"created_by": createdBy,
+			"created_at": createdAt,
+			"updated_at": updatedAt,
+		}
+		programs = append(programs, prog)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate programs: %w", err)
+	}
+	return programs, nil
+}
+
+// GetProgramByID returns a program by id, or an error if not found.
+func (s *Store) GetProgramByID(id int64) (map[string]any, error) {
+	var name, platform, createdAt, updatedAt string
+	var createdBy *int64
+
+	err := s.db.QueryRow(
+		`SELECT id, name, platform, created_by, created_at, updated_at FROM programs WHERE id = ?`,
+		id,
+	).Scan(&id, &name, &platform, &createdBy, &createdAt, &updatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("program %d not found", id)
+		}
+		return nil, fmt.Errorf("lookup program %d: %w", id, err)
+	}
+
+	return map[string]any{
+		"id":         id,
+		"name":       name,
+		"platform":   platform,
+		"created_by": createdBy,
+		"created_at": createdAt,
+		"updated_at": updatedAt,
+	}, nil
+}
+
+// GetProgramVersions returns all versions for a program.
+func (s *Store) GetProgramVersions(programID int64) ([]map[string]any, error) {
+	rows, err := s.db.Query(
+		`SELECT id, program_id, version, spec_json, author, created_at FROM program_versions WHERE program_id = ? ORDER BY version DESC`,
+		programID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query program versions: %w", err)
+	}
+	defer rows.Close()
+
+	var versions []map[string]any
+	for rows.Next() {
+		var id, pID, version int64
+		var specJSON string
+		var author *int64
+		var createdAt string
+
+		if err := rows.Scan(&id, &pID, &version, &specJSON, &author, &createdAt); err != nil {
+			return nil, fmt.Errorf("scan program version: %w", err)
+		}
+
+		ver := map[string]any{
+			"id":         id,
+			"program_id": pID,
+			"version":    version,
+			"author":     author,
+			"created_at": createdAt,
+		}
+		versions = append(versions, ver)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate versions: %w", err)
+	}
+	return versions, nil
+}
+
+// GetProgramVersion returns a specific program version.
+func (s *Store) GetProgramVersion(versionID int64) (map[string]any, error) {
+	var id, programID, version int64
+	var specJSON string
+	var author *int64
+	var createdAt string
+
+	err := s.db.QueryRow(
+		`SELECT id, program_id, version, spec_json, author, created_at FROM program_versions WHERE id = ?`,
+		versionID,
+	).Scan(&id, &programID, &version, &specJSON, &author, &createdAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("program version %d not found", versionID)
+		}
+		return nil, fmt.Errorf("lookup program version %d: %w", versionID, err)
+	}
+
+	// Parse spec_json to return as an object, not a string
+	var specObj any
+	if err := json.Unmarshal([]byte(specJSON), &specObj); err != nil {
+		return nil, fmt.Errorf("parse spec json: %w", err)
+	}
+
+	return map[string]any{
+		"id":         id,
+		"program_id": programID,
+		"version":    version,
+		"spec_json":  specObj,
+		"author":     author,
+		"created_at": createdAt,
+	}, nil
+}
+
+// UpdateProgramTimestamp updates the updated_at field for a program.
+func (s *Store) UpdateProgramTimestamp(programID int64) error {
+	_, err := s.db.Exec(
+		`UPDATE programs SET updated_at = ? WHERE id = ?`,
+		nowRFC3339(), programID,
+	)
+	if err != nil {
+		return fmt.Errorf("update program timestamp: %w", err)
 	}
 	return nil
 }

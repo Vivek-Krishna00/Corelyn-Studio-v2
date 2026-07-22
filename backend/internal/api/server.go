@@ -63,6 +63,10 @@ func New(deps Deps) *Server {
 	mux.HandleFunc("POST /api/auth/login", s.handleLogin)
 	mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/auth/session", s.handleSession)
+	mux.HandleFunc("GET /api/programs", s.handleGetPrograms)
+	mux.HandleFunc("POST /api/programs", s.handleCreateProgram)
+	mux.HandleFunc("GET /api/programs/{id}/versions", s.handleGetProgramVersions)
+	mux.HandleFunc("GET /api/versions/{id}", s.handleGetVersion)
 	s.mux = mux
 
 	if deps.Ros != nil {
