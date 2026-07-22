@@ -6,6 +6,7 @@ import DeployModal from "./ros/DeployModal";
 import { generateMissionSpec } from "./ros/missionSpec";
 import LoginPage from "./LoginPage";
 import SignupPage from "./SignupPage";
+import nodeData from "../shared/nodes.json";
 
 // ─── ENV ────────────────────────────────────────────────────────────────────
 
@@ -47,53 +48,9 @@ const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 2.0;
 const MARQUEE_THRESHOLD = 6;
 
-const NODE_DEFS = [
-  // ── FLOW ──
-  { type: "start", label: "Start", category: "flow", icon: "▶️", color: "#10b981", ports: [{ id: "out", label: "OUT", side: "out" }], params: { workflow_id: { label: "Workflow ID", type: "text", default: "mission_001" }, initial_pose_estimate: { label: "Initial Pose (x,y,θ)", type: "text", default: "0.0,0.0,0.0" } } },
-  { type: "end", label: "End", category: "flow", icon: "🛑", color: "#10b981", ports: [{ id: "in", label: "IN", side: "in" }], params: { terminate_status: { label: "Terminate Status", type: "select", options: ["success", "idle", "emergency_stop"], default: "success" }, trigger_callback_hook: { label: "Callback Hook", type: "text", default: "/mission/complete" } } },
-
-  // ── MOTION ──
-  { type: "move_forward", label: "Move Forward", category: "motion", icon: "⬆️", color: "#3b82f6", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { distance: { label: "Distance (m)", type: "number", default: 1.0 }, linear_velocity: { label: "Linear Velocity (m/s)", type: "number", default: 0.5 } } },
-  { type: "move_backward", label: "Move Backward", category: "motion", icon: "⬇️", color: "#3b82f6", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { distance: { label: "Distance (m)", type: "number", default: 0.5 }, linear_velocity: { label: "Linear Velocity (m/s)", type: "number", default: 0.3 } } },
-  { type: "rotate_left", label: "Rotate Left", category: "motion", icon: "🔄", color: "#3b82f6", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { angular_velocity: { label: "Angular Velocity (rad/s)", type: "number", default: 0.5 }, direction: { label: "Direction", type: "select", options: ["CCW", "CW"], default: "CCW" } } },
-  { type: "rotate_right", label: "Rotate Right", category: "motion", icon: "🔄", color: "#3b82f6", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { angular_velocity: { label: "Angular Velocity (rad/s)", type: "number", default: 0.5 }, direction: { label: "Direction", type: "select", options: ["CW", "CCW"], default: "CW" } } },
-  { type: "set_speed", label: "Set Speed", category: "motion", icon: "⚡", color: "#3b82f6", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { max_linear_velocity: { label: "Max Linear Vel (m/s)", type: "number", default: 1.0 }, max_angular_velocity: { label: "Max Angular Vel (rad/s)", type: "number", default: 1.5 } } },
-  { type: "stop", label: "Stop", category: "motion", icon: "🛑", color: "#ef4444", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { brake_type: { label: "Brake Type", type: "select", options: ["controlled", "emergency"], default: "controlled" }, deceleration_rate: { label: "Deceleration (m/s²)", type: "number", default: 0.5 } } },
-
-  // ── NAVIGATION ──
-  { type: "go_to_waypoint", label: "Go to Waypoint", category: "navigation", icon: "📍", color: "#8b5cf6", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { waypoint_id: { label: "Waypoint ID", type: "text", default: "WP-01" }, coordinates_xy: { label: "Coordinates (x,y)", type: "text", default: "10.5,20.3" } } },
-  { type: "return_to_home", label: "Return to Home", category: "navigation", icon: "🏠", color: "#8b5cf6", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { home_station_id: { label: "Home Station ID", type: "text", default: "home_01" }, route_preference: { label: "Route Preference", type: "select", options: ["shortest", "safest"], default: "shortest" } } },
-  { type: "set_home_station", label: "Set Home Station", category: "navigation", icon: "📌", color: "#8b5cf6", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { current_gps_coordinates: { label: "2D Map Coordinates", type: "text", default: "47.6062,-122.3321" }, map_layer_id: { label: "Map Layer ID", type: "text", default: "floor_1" }, save_current_pose_as_home: { label: "Save Current Pose", type: "boolean", default: true } } },
-
-  // ── AGV / AMR ──
-  { type: "dock_at_station", label: "Dock at Station", category: "agv_amr", icon: "⚓", color: "#d97706", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { station_id: { label: "Station ID", type: "text", default: "dock_A" }, charging_contacts_engage: { label: "Charge Contacts Engage", type: "boolean", default: true }, alignment_precision_mm: { label: "Alignment Precision (mm)", type: "number", default: 5 } } },
-  { type: "undock", label: "Undock", category: "agv_amr", icon: "🚀", color: "#d97706", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { exit_clearance_distance: { label: "Exit Clearance (m)", type: "number", default: 0.5 }, reverse_speed: { label: "Reverse Speed (m/s)", type: "number", default: 0.15 }, post_undock_pose_check: { label: "Post-Undock Pose Check", type: "boolean", default: true } } },
-  { type: "wait_at_station", label: "Wait at Station", category: "agv_amr", icon: "⏳", color: "#d97706", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { station_id: { label: "Station ID", type: "text", default: "dock_A" }, wait_duration: { label: "Wait Duration (s)", type: "number", default: 10 }, release_condition: { label: "Release Condition", type: "select", options: ["timer", "payload_sensor", "manual_trigger"], default: "timer" } } },
-  { type: "pick_up_cargo", label: "Pick Up Cargo", category: "agv_amr", icon: "📦", color: "#d97706", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { actuator_mechanism: { label: "Actuator Mechanism", type: "select", options: ["lift_fork", "conveyor", "tow_hook"], default: "lift_fork" }, load_weight_sensor_threshold: { label: "Weight Threshold (kg)", type: "number", default: 50.0 }, clamp_force_pct: { label: "Clamp Force (%)", type: "number", default: 75 } } },
-  { type: "drop_cargo", label: "Drop Cargo", category: "agv_amr", icon: "📤", color: "#d97706", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { offload_direction: { label: "Offload Direction", type: "select", options: ["forward", "reverse", "side"], default: "forward" }, validation_sensor_check: { label: "Validation Sensor Check", type: "boolean", default: true }, clearance_timeout_ms: { label: "Clearance Timeout (ms)", type: "number", default: 5000 } } },
-  { type: "go_charge", label: "Go Charge", category: "agv_amr", icon: "🔋", color: "#d97706", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { battery_station_target_id: { label: "Charge Station ID", type: "text", default: "charger_01" }, threshold_trigger_pct: { label: "Battery Threshold (%)", type: "number", default: 20 }, fast_charge_override: { label: "Fast Charge Override", type: "boolean", default: false } } },
-
-  // ── CONTROL ──
-  { type: "loop_start", label: "Loop Start", category: "control", icon: "🔄", color: "#f59e0b", ports: [{ id: "in", label: "IN", side: "in" }, { id: "body", label: "BODY", side: "out" }, { id: "done", label: "DONE", side: "out" }], params: { loop_count: { label: "Loop Count", type: "number", default: 3 }, break_on_error: { label: "Break on Error", type: "boolean", default: false }, evaluation_condition_string: { label: "Condition Expression", type: "text", default: "iteration < count" } } },
-  { type: "loop_end", label: "Loop End", category: "control", icon: "↩️", color: "#f59e0b", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { target_loop_start_id: { label: "Target Loop Start ID", type: "text", default: "" }, nested_level: { label: "Nested Level", type: "number", default: 1 } } },
-  { type: "wait_delay", label: "Wait / Delay", category: "control", icon: "⏱️", color: "#f59e0b", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { duration_ms: { label: "Duration (ms)", type: "number", default: 2000 }, non_blocking_execution: { label: "Non-Blocking", type: "boolean", default: false } } },
-  { type: "emit_event", label: "Emit Event", category: "control", icon: "📣", color: "#f59e0b", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { event_topic: { label: "Event Topic", type: "text", default: "/robot/status" }, payload_json: { label: "Payload (JSON)", type: "text", default: '{"status":"complete"}' }, broadcast_severity: { label: "Broadcast Severity", type: "select", options: ["info", "warning", "critical"], default: "info" } } },
-
-  // ── SENSING ──
-  { type: "check_battery", label: "Check Battery", category: "sensing", icon: "🔋", color: "#e11d48", ports: [{ id: "in", label: "IN", side: "in" }, { id: "ok", label: "OK", side: "out" }, { id: "low", label: "LOW", side: "out" }], params: { alert_voltage_threshold: { label: "Alert Voltage Threshold", type: "number", default: 24.0 }, low_battery_routing_action: { label: "Low Battery Action", type: "select", options: ["go_to_charge", "halt_pipeline"], default: "go_to_charge" }, telemetry_interval_ms: { label: "Telemetry Interval (ms)", type: "number", default: 1000 } } },
-  { type: "detect_obstacle", label: "Detect Obstacle", category: "sensing", icon: "📡", color: "#e11d48", ports: [{ id: "in", label: "IN", side: "in" }, { id: "clear", label: "CLEAR", side: "out" }, { id: "blocked", label: "BLOCKED", side: "out" }], params: { sensor_input_source: { label: "Sensor Source", type: "select", options: ["LiDAR", "DepthCamera", "Ultrasonic"], default: "LiDAR" }, detection_range_meters: { label: "Detection Range (m)", type: "number", default: 2.0 }, field_of_view_deg: { label: "Field of View (°)", type: "number", default: 270 } } },
-  { type: "read_position", label: "Read Position", category: "sensing", icon: "📍", color: "#e11d48", ports: [{ id: "in", label: "IN", side: "in" }, { id: "out", label: "OUT", side: "out" }], params: { localization_source: { label: "Localization Source", type: "select", options: ["AMCL", "SLAM", "GPS", "Odometry"], default: "AMCL" }, publish_to_dashboard: { label: "Publish to Dashboard", type: "boolean", default: true }, accuracy_threshold_mm: { label: "Accuracy Threshold (mm)", type: "number", default: 50 } } },
-];
-
-const CATEGORY_ORDER = ["flow", "motion", "navigation", "agv_amr", "control", "sensing"];
-const CATEGORY_META = {
-  flow: { label: "Flow", color: "#10b981" },
-  motion: { label: "Motion", color: "#3b82f6" },
-  navigation: { label: "Navigation", color: "#8b5cf6" },
-  agv_amr: { label: "AGV / AMR", color: "#d97706" },
-  control: { label: "Control", color: "#f59e0b" },
-  sensing: { label: "Sensing", color: "#e11d48" },
-};
+const NODE_DEFS = nodeData.nodes;
+const CATEGORY_ORDER = nodeData.categories.map(c => c.id);
+const CATEGORY_META = Object.fromEntries(nodeData.categories.map(c => [c.id, { label: c.label, color: c.color }]));
 
 const DEFAULT_EXPANDED_CATEGORIES = {
   flow: false,

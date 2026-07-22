@@ -2,9 +2,10 @@
 // Golden mission-spec fixtures, captured from the v1 JS implementation.
 //
 // These files are the contract. They are generated from the REAL
-// generateMissionSpec (src/ros/missionSpec.js) and the REAL NODE_DEFS array
-// (src/App.jsx) — nothing here reimplements either. Regenerating must be a
-// no-op diff; a non-empty `git diff shared/testdata/` means behaviour changed.
+// generateMissionSpec (src/ros/missionSpec.js) and the REAL node defs
+// (shared/nodes.json, the same file src/App.jsx imports) — nothing here
+// reimplements either. Regenerating must be a no-op diff; a non-empty
+// `git diff shared/testdata/` means behaviour changed.
 //
 // Run: node shared/testdata/gen_fixtures.mjs
 
@@ -16,15 +17,11 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..", "..");
 
 // ── the real NODE_DEFS ──────────────────────────────────────────────────────
-// Not exported by App.jsx, so slice the literal out of the source and eval it.
-// Deliberate: guarantees the fixtures reflect the shipped array, not a copy.
-const APP_SRC = readFileSync(path.join(REPO, "src", "App.jsx"), "utf8");
-const DECL = "const NODE_DEFS = [";
-const start = APP_SRC.indexOf(DECL);
-if (start < 0) throw new Error("NODE_DEFS literal not found in src/App.jsx");
-const end = APP_SRC.indexOf("\n];", start);
-if (end < 0) throw new Error("NODE_DEFS literal is unterminated in src/App.jsx");
-const NODE_DEFS = new Function(`${APP_SRC.slice(start, end + 3)}\nreturn NODE_DEFS;`)();
+// shared/nodes.json is the source of truth (src/App.jsx imports it directly),
+// so reading it here guarantees the fixtures reflect the shipped data.
+const { nodes: NODE_DEFS } = JSON.parse(
+  readFileSync(path.join(REPO, "shared", "nodes.json"), "utf8"),
+);
 
 // ── the real serializer ─────────────────────────────────────────────────────
 const { generateMissionSpec } = await import(
