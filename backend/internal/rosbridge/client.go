@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -130,7 +131,27 @@ func (c *Client) setState(s ConnState) {
 	c.state = s
 	fn := c.OnState
 	c.mu.Unlock()
-	if changed && fn != nil {
+	if !changed {
+		return
+	}
+	// The robot link is the one thing an operator cannot see from the UI when
+	// it is missing — a deploy just fails with "robot link unavailable" and
+	// nothing says why. These lines are how the daemon's own output answers
+	// "is the robot (or mockbot) actually there".
+	//
+	// Levels are chosen for a terminal someone is watching: the dial attempt
+	// is noise, a live link is worth one line, and a robot that is not there
+	// should keep saying so — the backoff caps at 4s, so it is loud without
+	// being a flood, and it stops the moment it connects.
+	switch s {
+	case Connecting:
+		slog.Debug("rosbridge dialling", "url", c.url)
+	case Connected:
+		slog.Info("rosbridge connected", "url", c.url)
+	default:
+		slog.Warn("rosbridge not connected", "url", c.url)
+	}
+	if fn != nil {
 		fn(s)
 	}
 }
