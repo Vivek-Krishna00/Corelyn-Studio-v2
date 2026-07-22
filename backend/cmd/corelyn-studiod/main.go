@@ -18,6 +18,7 @@ import (
 
 	"corelynstudio/backend/internal/api"
 	"corelynstudio/backend/internal/nodes"
+	"corelynstudio/backend/internal/rosbridge"
 	"corelynstudio/backend/internal/store"
 )
 
@@ -31,7 +32,7 @@ func main() {
 func run() error {
 	port := flag.Int("port", 0, "port to bind on 127.0.0.1 (required)")
 	dbPath := flag.String("db", "", "path to the SQLite database file (required)")
-	_ = flag.String("rosbridge", "", "rosbridge WebSocket URL (optional; wired up in Task B4)")
+	rosURL := flag.String("rosbridge", "", "rosbridge WebSocket URL, e.g. ws://127.0.0.1:9090 (optional)")
 	flag.Parse()
 
 	if *port == 0 {
@@ -52,16 +53,33 @@ func run() error {
 	}
 	defer st.Close()
 
-	srv := api.New(api.Deps{Store: st, Defs: defs})
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// The daemon, not the renderer, owns the robot link (spec D2). With no
+	// --rosbridge URL the API still serves; deploys simply have nowhere to go.
+	var ros *rosbridge.Client
+	if *rosURL != "" {
+		ros = rosbridge.New(*rosURL)
+	}
+
+	srv := api.New(api.Deps{Store: st, Defs: defs, Ros: ros})
+
+	if ros != nil {
+		go func() {
+			// Connect reconnects with backoff internally and only returns
+			// once ctx is cancelled.
+			if err := ros.Connect(ctx); err != nil && ctx.Err() == nil {
+				slog.Error("rosbridge connect", "error", err)
+			}
+		}()
+	}
 
 	// Daemon binds 127.0.0.1 only — never 0.0.0.0.
 	httpSrv := &http.Server{
 		Addr:    fmt.Sprintf("127.0.0.1:%d", *port),
 		Handler: srv,
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	// An orphaned sidecar must die when Electron is killed hard: Electron
 	// closes our stdin, so EOF on it is as much a shutdown signal as

@@ -55,6 +55,14 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
+	if s.estopped {
+		s.mu.Unlock()
+		// Spec §8.1: Run/Deploy stay locked out until the E-Stop is
+		// explicitly cleared on the robot.
+		writeError(w, http.StatusConflict,
+			"E-Stop is engaged; clear the E-Stop on the robot before deploying")
+		return
+	}
 	if s.active != nil {
 		running := s.active.missionID
 		s.mu.Unlock()
@@ -80,9 +88,24 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Mark the run active before publishing: status events can come back
+	// before Publish returns, and they must find a run to attach to.
 	s.mu.Lock()
 	s.active = &activeRun{missionID: spec.MissionID, programVersionID: versionID, missionRunID: runID}
 	s.mu.Unlock()
+
+	if s.deps.Ros != nil {
+		// std_msgs/String has exactly one field, so the spec travels as a
+		// string in msg.data rather than nested JSON (spec §4.5).
+		if err := s.deps.Ros.Publish(topicDeploy, msgTypeStr, map[string]string{"data": string(body)}); err != nil {
+			s.mu.Lock()
+			s.active = nil
+			s.mu.Unlock()
+			s.deps.Store.EndMissionRun(runID, "error")
+			writeError(w, http.StatusServiceUnavailable, "robot link unavailable: "+err.Error())
+			return
+		}
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"mission_id": spec.MissionID, "status": "deployed"})
 }

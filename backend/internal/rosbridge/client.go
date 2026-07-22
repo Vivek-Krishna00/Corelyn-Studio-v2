@@ -94,6 +94,12 @@ type inFrame struct {
 type Client struct {
 	url string
 
+	// OnState, if set before Connect, is called on every state transition.
+	// The daemon uses it to surface a dropped robot link to the operator
+	// within 1s (spec §8.1) instead of leaving the UI waiting silently.
+	// It is called synchronously from the connect loop, so it must not block.
+	OnState func(ConnState)
+
 	mu         sync.Mutex
 	state      ConnState
 	conn       *websocket.Conn
@@ -120,8 +126,13 @@ func (c *Client) State() ConnState {
 
 func (c *Client) setState(s ConnState) {
 	c.mu.Lock()
+	changed := c.state != s
 	c.state = s
+	fn := c.OnState
 	c.mu.Unlock()
+	if changed && fn != nil {
+		fn(s)
+	}
 }
 
 // Connect dials the rosbridge server and maintains the connection until ctx
@@ -149,10 +160,15 @@ func (c *Client) Connect(ctx context.Context) error {
 		c.mu.Lock()
 		c.conn = conn
 		c.mu.Unlock()
+
+		// Resend advertise/subscribe BEFORE announcing Connected: callers
+		// that wait for Connected then publish would otherwise race the
+		// subscribe frame, and rosbridge drops publishes to topics it has
+		// no subscribers for.
+		c.resendState()
 		c.setState(Connected)
 		backoff = 0
 
-		c.resendState()
 		c.readLoop(ctx, conn)
 
 		conn.CloseNow()

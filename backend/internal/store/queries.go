@@ -66,6 +66,20 @@ func (s *Store) StartMissionRun(programVersionID int64) (int64, error) {
 	return res.LastInsertId()
 }
 
+// RecordNodeEvent appends one {node_id,status} event to a run's history. This
+// is what makes the System Log reconstructable after a restart, and what lets
+// a fault name the node that failed once the run is over.
+func (s *Store) RecordNodeEvent(runID int64, nodeID, status string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO node_events (mission_run_id, node_id, status, at) VALUES (?, ?, ?, ?)`,
+		runID, nodeID, status, nowRFC3339(),
+	)
+	if err != nil {
+		return fmt.Errorf("record node event for run %d: %w", runID, err)
+	}
+	return nil
+}
+
 // EndMissionRun marks a run finished with the given result, e.g. "complete",
 // "cancelled", or "error".
 func (s *Store) EndMissionRun(runID int64, result string) error {

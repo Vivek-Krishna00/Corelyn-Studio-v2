@@ -45,7 +45,7 @@ func run() error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", ros.handleWS)
-	mux.HandleFunc("POST /_fault", newFaultHandler(ros, amr, faults))
+	mux.HandleFunc("POST /_fault", newFaultHandler(ros, exec, amr, faults))
 
 	// Loopback only, matching the daemon (spec "Daemon binds 127.0.0.1 only").
 	httpSrv := &http.Server{
@@ -83,7 +83,7 @@ type faultRequest struct {
 	Pct    float64 `json:"pct,omitempty"`
 }
 
-func newFaultHandler(ros *rosServer, amr *sim.AMR, faults *sim.Faults) http.HandlerFunc {
+func newFaultHandler(ros *rosServer, exec *executor, amr *sim.AMR, faults *sim.Faults) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req faultRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -97,6 +97,10 @@ func newFaultHandler(ros *rosServer, amr *sim.AMR, faults *sim.Faults) http.Hand
 		case "estop":
 			faults.SetEstop(true)
 			ros.publish(r.Context(), topicStatus, statusMsg{NodeID: "__mission__", Status: "estop"})
+			// Don't answer until motion has actually ceased.
+			if !exec.waitIdle(2 * time.Second) {
+				slog.Warn("mockbot: mission did not halt within the E-Stop budget")
+			}
 		case "node_error":
 			faults.SetNodeError(req.NodeID)
 		case "battery":
@@ -105,6 +109,10 @@ func newFaultHandler(ros *rosServer, amr *sim.AMR, faults *sim.Faults) http.Hand
 			faults.SetStalled(true)
 		case "clear":
 			faults.Clear()
+			// Tell the daemon the robot is safe again — without this it has
+			// no way to learn the E-Stop was released, and Deploy would stay
+			// locked out forever (spec §8.1 "until explicitly cleared").
+			ros.publish(r.Context(), topicStatus, statusMsg{NodeID: "__mission__", Status: "ready"})
 		default:
 			http.Error(w, fmt.Sprintf(`{"detail":"unknown fault %q"}`, req.Fault), http.StatusBadRequest)
 			return

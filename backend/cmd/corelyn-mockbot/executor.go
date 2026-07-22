@@ -18,6 +18,13 @@ const (
 	// defaultNodeDuration is used for every node type that isn't a
 	// wait_delay or a motion node (spec §8 "everything else 800ms").
 	defaultNodeDuration = 800 * time.Millisecond
+
+	// lowBatteryPct is the auto-pause threshold (spec §8.1 "drain battery
+	// below threshold → auto-pause, operator alert").
+	//
+	// ponytail: one flat threshold, no hysteresis. Add a resume threshold if
+	// a real pack's voltage sag starts flapping the pause.
+	lowBatteryPct = 20.0
 )
 
 // statusMsg mirrors the daemon's /ws/mission/status shape (spec §4.3) —
@@ -97,14 +104,14 @@ func (e *executor) run(spec mission.Spec) {
 		if e.faults.Estopped() {
 			return
 		}
+		if e.pauseIfFlat(ctx) {
+			return
+		}
 
 		n := byID[id]
 		e.publish(ctx, id, "running")
 
-		d := e.nodeDuration(n)
-		time.Sleep(d)
-
-		if e.faults.Estopped() {
+		if !e.sleepUnlessHalted(e.nodeDuration(n)) {
 			return
 		}
 		if e.faults.NodeErrorFor(id) {
@@ -115,7 +122,60 @@ func (e *executor) run(spec mission.Spec) {
 		e.publish(ctx, id, "done")
 	}
 
+	// Draining flat on the last node must pause, not complete.
+	if e.pauseIfFlat(ctx) {
+		return
+	}
 	e.publish(ctx, "__mission__", "complete")
+}
+
+// waitIdle blocks until no mission is executing, or timeout elapses. The
+// E-Stop control endpoint uses it so that a 200 means "the robot has actually
+// stopped", not "the stop request was noted" — otherwise a caller that stops
+// and immediately redeploys races the halt.
+func (e *executor) waitIdle(timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		e.mu.Lock()
+		running := e.running
+		e.mu.Unlock()
+		if !running {
+			return true
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return false
+}
+
+// sleepUnlessHalted waits out a node's duration in slices, aborting the moment
+// an E-Stop is engaged. A real E-Stop cuts motion immediately — it does not
+// let the current move finish — and the daemon must be free to accept a new
+// deploy as soon as the stop is cleared.
+func (e *executor) sleepUnlessHalted(d time.Duration) bool {
+	const slice = 20 * time.Millisecond
+	deadline := time.Now().Add(d)
+	for {
+		if e.faults.Estopped() {
+			return false
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return true
+		}
+		time.Sleep(min(remaining, slice))
+	}
+}
+
+// pauseIfFlat halts the mission when the battery is below threshold, alerting
+// the operator first. It reports whether the run was paused. The run is not
+// resumed automatically — the operator charges and redeploys.
+func (e *executor) pauseIfFlat(ctx context.Context) bool {
+	if e.amr.Battery() >= lowBatteryPct {
+		return false
+	}
+	e.publish(ctx, "__mission__", "low_battery")
+	e.publish(ctx, "__mission__", "paused")
+	return true
 }
 
 // publish sends a status event over rosbridge, unless the "stall" fault is
