@@ -7,6 +7,11 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 export default defineConfig([
   globalIgnores(['dist']),
   {
+    // The Playwright specs run in Node, not the browser.
+    files: ['tests/**/*.js', 'playwright.config.js'],
+    languageOptions: { globals: globals.node },
+  },
+  {
     files: ['**/*.{js,jsx}'],
     extends: [
       js.configs.recommended,

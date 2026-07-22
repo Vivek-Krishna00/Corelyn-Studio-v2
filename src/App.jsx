@@ -1112,7 +1112,7 @@ export default function RobotHMI() {
               </div>
               <div style={{ marginBottom: 12 }}>
                 <label style={{ fontSize: 14, letterSpacing: "0.08em", color: "var(--text-soft)", display: "block", marginBottom: 5, fontWeight: 700 }}>NODE ID</label>
-                <div style={{ padding: "5px 8px", background: "var(--input-bg)", border: "1px solid var(--border)", borderRadius: 5, fontSize: 14, color: "var(--text-muted)" }}>{selectedNode.id}</div>
+                <div className="inspector-node-id" style={{ padding: "5px 8px", background: "var(--input-bg)", border: "1px solid var(--border)", borderRadius: 5, fontSize: 14, color: "var(--text-muted)" }}>{selectedNode.id}</div>
               </div>
               <button onClick={() => { dispatch({ type: "DELETE_NODE", id: selected }); setSelected(null); setSelectedIds([]); toast("Node deleted", "info"); }}
                 style={{ width: "100%", padding: "8px", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)", borderRadius: 6, color: "#dc2626", cursor: "pointer", fontSize: 14, fontFamily: "'Inter', sans-serif", fontWeight: 600, letterSpacing: "0.03em", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
@@ -1182,7 +1182,7 @@ export default function RobotHMI() {
           </div>
           {logs.map((l, i) => (
             <div key={i} style={{ display: "flex", gap: 7, padding: "4px 0", borderBottom: "1px solid var(--border-soft)" }}>
-              <span style={{ fontSize: 14, color: "var(--text-faint)", flexShrink: 0 }}>{l.time}</span>
+              <span className="log-time" style={{ fontSize: 14, color: "var(--text-faint)", flexShrink: 0 }}>{l.time}</span>
               <span style={{ fontSize: 14, color: l.type === "success" ? "#10b981" : l.type === "error" ? "#dc2626" : l.type === "warn" ? "#d97706" : l.type === "info" ? "#3b82f6" : "var(--text-muted)", lineHeight: 1.5 }}>{l.msg}</span>
             </div>
           ))}
@@ -1650,7 +1650,7 @@ export default function RobotHMI() {
         )}
 
       {/* ── TOASTS ── */}
-      <div style={{ position: "fixed", top: 62, right: 16, zIndex: 999, display: "flex", flexDirection: "column", gap: 6, pointerEvents: "none" }}>
+      <div className="toast-stack" style={{ position: "fixed", top: 62, right: 16, zIndex: 999, display: "flex", flexDirection: "column", gap: 6, pointerEvents: "none" }}>
         {toasts.map(t => (
           <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "var(--panel-bg)", border: `1px solid ${t.type === "success" ? "#10b981" : t.type === "error" ? "#dc2626" : "#3b82f6"}`, borderRadius: 6, fontSize: 14, color: "var(--text-main)", boxShadow: "var(--shadow-raised)", animation: "slideIn 0.2s ease" }}>
             <span style={{ color: t.type === "success" ? "#10b981" : t.type === "error" ? "#dc2626" : "#3b82f6" }}>{t.type === "success" ? "✓" : t.type === "error" ? "✕" : "ℹ"}</span>
