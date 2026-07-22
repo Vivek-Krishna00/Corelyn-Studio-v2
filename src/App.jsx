@@ -9,6 +9,7 @@ import NodeCard from "./canvas/NodeCard";
 import DeployModalWrapper from "./mission/DeployModalWrapper";
 import SettingsPanel from "./shell/SettingsPanel";
 import TopBtn from "./shell/TopBtn";
+import useBreakpoint, { COMPACT_MAX_WIDTH, NARROW_MAX_WIDTH } from "./shell/useBreakpoint";
 import { CANVAS_TONES, DEFAULT_EDITOR_SETTINGS, GRID_DENSITIES, LIGHT_CANVAS_TONES, THEME_MODES, getSystemTheme, readEditorSettings } from "./shell/editorSettings";
 import { MARQUEE_THRESHOLD, MAX_ZOOM, MIN_ZOOM, NODE_H, NODE_PLACE_GAP, NODE_W, clamp, findOpenNodePosition, getEstimatedNodeHeight, getNodePlacementRect, getPortPos, getSteppedConnectionPath, getTouchMetrics, normalizeRect, rectsIntersect } from "./canvas/geometry";
 import NodeInspector from "./inspector/NodeInspector";
@@ -132,9 +133,11 @@ export default function RobotHMI() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editorSettings, setEditorSettings] = useState(readEditorSettings);
   const [systemTheme, setSystemTheme] = useState(getSystemTheme);
+  const [overflowMenuOpen, setOverflowMenuOpen] = useState(false);
 
   const canvasRef = useRef(null);
   const importInputRef = useRef(null);
+  const overflowMenuRef = useRef(null);
   const tapRef = useRef({ startX: 0, startY: 0, startTime: 0, nodeId: null });
   const touchGestureRef = useRef(null);
   const safariGestureRef = useRef(null);
@@ -824,6 +827,28 @@ export default function RobotHMI() {
     return () => mql.removeEventListener("change", handler);
   }, []);
 
+  // Top bar's "compact" tier — Clear/Export/Import/Run/Stop/Deploy/CHAIN go
+  // icon-only and the status pills abbreviate (needed for the row to actually
+  // fit down to 1000px; App.css handles the rest of this tier via media query).
+  const isCompact = useBreakpoint(COMPACT_MAX_WIDTH);
+  // Top bar's "narrow" tier — Clear/Export/Import/CHAIN/telemetry collapse into the ⋯ overflow menu.
+  const isNarrow = useBreakpoint(NARROW_MAX_WIDTH);
+
+  // Overflow menu closes on outside click or Escape, same convention as the settings backdrop.
+  useEffect(() => {
+    if (!overflowMenuOpen) return;
+    const closeOnEscape = (e) => { if (e.key === "Escape") setOverflowMenuOpen(false); };
+    const closeOnOutsideClick = (e) => {
+      if (overflowMenuRef.current && !overflowMenuRef.current.contains(e.target)) setOverflowMenuOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("mousedown", closeOnOutsideClick);
+    return () => {
+      window.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("mousedown", closeOnOutsideClick);
+    };
+  }, [overflowMenuOpen]);
+
   useEffect(() => {
     if (!isLoggedIn) return;
     const element = canvasRef.current;
@@ -894,6 +919,35 @@ export default function RobotHMI() {
     }
   }), []);
 
+  // ── Top bar action handlers (shared between the toolbar row and the ⋯ overflow menu) ──
+  const handleClearCanvas = () => { dispatch({ type: "CLEAR" }); setSelected(null); setSelectedIds([]); setMarquee(null); toast("Canvas cleared", "info"); };
+  const handleExportMission = () => {
+    if (flow.nodes.length === 0) { toast("Add nodes before exporting", "error"); return; }
+    const spec = generateMissionSpec({ nodes: flow.nodes, connections: flow.connections }, NODE_DEFS);
+    const steps = spec.topological_order.map((nodeId, i) => {
+      const node = flow.nodes.find(n => n.id === nodeId);
+      const def = getNodeDef(node?.type);
+      return { step: i + 1, type: node?.type || "unknown", label: def?.label || node?.type || "unknown", params: node?.params || {} };
+    });
+    const output = { mission: "Corelyn Robotics Mission", exported_at: new Date().toISOString(), total_steps: steps.length, steps };
+    const blob = new Blob([JSON.stringify(output, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `mission_export_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast(`${steps.length} steps exported`, "success");
+    addLog(`📋 Exported ${steps.length} step-by-step instructions`, "info");
+  };
+  const handleImportClick = () => importInputRef.current?.click();
+  const handleToggleChain = () => setChainMode(c => !c);
+  const telemetryItems = [
+    ["BATT", `${Math.round(amr.battery)}%`, battColor],
+    ["VEL", `${amr.speed.toFixed(2)}m/s`, "#3b82f6"],
+    ["CONNS", flow.connections.length, "#7c3aed"],
+  ];
+
   // ── Right panel content (shared between mobile drawer and desktop sidebar) ──
   const renderRightPanelContent = () => (
     <>
@@ -939,84 +993,80 @@ export default function RobotHMI() {
     >
 
       {/* ── TOPBAR ── */}
-      <div style={{ display: "flex", alignItems: "center", height: 52, padding: "0 16px", background: "var(--topbar-bg)", borderBottom: "1px solid var(--border)", flexShrink: 0, zIndex: 100, gap: 10, boxShadow: "var(--shadow-subtle)" }}>
+      <div className="topbar-row" style={{ display: "flex", alignItems: "center", height: 52, padding: "0 16px", background: "var(--topbar-bg)", borderBottom: "1px solid var(--border)", flexShrink: 0, zIndex: 100, gap: 10, boxShadow: "var(--shadow-subtle)" }}>
         {/* Logo */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0, minWidth: 230 }}>
+        <div className="topbar-logo" style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0, minWidth: 230 }}>
           <img src={corelynLogo} alt="Corelyn" style={{ height: 40, width: "auto", display: "block" }} />
           <div>
             <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.015em" }}>
               <span style={{ color: "var(--brand-corelyn)" }}>Corelyn</span><span style={{ color: "var(--brand-robotics)" }}> Robotics</span>
             </div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-soft)", letterSpacing: "0.12em", lineHeight: 1.4, whiteSpace: "nowrap" }}>PROGRAM | DEPLOY | DOMINATE</div>
+            <div className="topbar-tagline" style={{ fontSize: 14, fontWeight: 600, color: "var(--text-soft)", letterSpacing: "0.12em", lineHeight: 1.4, whiteSpace: "nowrap" }}>PROGRAM | DEPLOY | DOMINATE</div>
           </div>
         </div>
 
-        <div style={{ width: 1, height: 28, background: "var(--border)", margin: "0 4px" }} />
+        {!isNarrow && (
+          <>
+            <div style={{ width: 1, height: 28, background: "var(--border)", margin: "0 4px" }} />
 
-        {/* Mission status pill */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "var(--panel-bg)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 14, color: "var(--text-soft)", whiteSpace: "nowrap", flexShrink: 0 }}>
-          <div style={{ width: 7, height: 7, borderRadius: "50%", background: missionRunning ? "#10b981" : "#3a3a3a", animation: missionRunning ? "pulse 1.4s infinite" : "none" }} />
-          {missionRunning ? "RUNNING" : "IDLE"} · {flow.nodes.length} NODES
-        </div>
+            {/* Mission status pill */}
+            <div className="topbar-status-pill" style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "var(--panel-bg)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 14, color: "var(--text-soft)", whiteSpace: "nowrap", flexShrink: 0 }}>
+              <div style={{ width: 7, height: 7, borderRadius: "50%", background: missionRunning ? "#10b981" : "#3a3a3a", animation: missionRunning ? "pulse 1.4s infinite" : "none" }} />
+              {missionRunning ? "RUNNING" : "IDLE"} · {flow.nodes.length}{isCompact ? "" : " NODES"}
+            </div>
 
-        {/* Backend status */}
-        <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 8px", background: backendOnline ? "var(--panel-bg)" : "rgba(245,158,11,0.12)", border: `1px solid ${backendOnline ? "var(--border)" : "rgba(245,158,11,0.25)"}`, borderRadius: 6, fontSize: 14, color: backendOnline ? "#10b981" : "#d97706", fontWeight: 600, letterSpacing: "0.04em", whiteSpace: "nowrap", flexShrink: 0 }}>
-          <div style={{ width: 6, height: 6, borderRadius: "50%", background: backendOnline ? "#10b981" : "#d97706" }} />
-          {backendOnline ? "API ONLINE" : "DEMO MODE"}
-        </div>
+            {/* Backend status */}
+            <div className="topbar-status-pill" style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 8px", background: backendOnline ? "var(--panel-bg)" : "rgba(245,158,11,0.12)", border: `1px solid ${backendOnline ? "var(--border)" : "rgba(245,158,11,0.25)"}`, borderRadius: 6, fontSize: 14, color: backendOnline ? "#10b981" : "#d97706", fontWeight: 600, letterSpacing: "0.04em", whiteSpace: "nowrap", flexShrink: 0 }}>
+              <div style={{ width: 6, height: 6, borderRadius: "50%", background: backendOnline ? "#10b981" : "#d97706" }} />
+              {isCompact ? (backendOnline ? "ONLINE" : "DEMO") : (backendOnline ? "API ONLINE" : "DEMO MODE")}
+            </div>
+          </>
+        )}
 
         <div style={{ flex: 1 }} />
 
         {/* Center toolbar - N8N style */}
-        <div className="topbar-desktop-only" style={{ display: "flex", alignItems: "center", gap: 4, background: "var(--panel-bg)", border: "1px solid var(--border)", borderRadius: 8, padding: 3, flexShrink: 0, whiteSpace: "nowrap" }}>
-          <TopBtn onClick={() => { dispatch({ type: "CLEAR" }); setSelected(null); setSelectedIds([]); setMarquee(null); toast("Canvas cleared", "info"); }} title="Clear canvas">⊠ Clear</TopBtn>
-          <div style={{ width: 1, height: 20, background: "var(--border)" }} />
-          <TopBtn onClick={runMission} disabled={missionRunning} accent="#10b981" title="Run mission">{backendOnline ? "▶ Run" : "▶ Demo Run"}</TopBtn>
-          <TopBtn onClick={stopMission} disabled={!missionRunning} accent="#dc2626" title="Stop">■ Stop</TopBtn>
-          <TopBtn onClick={() => setDeployModalOpen(true)} disabled={flow.nodes.length === 0} accent="#8b5cf6" title="Deploy mission to robot">🚀 Deploy</TopBtn>
-          <TopBtn onClick={() => {
-            if (flow.nodes.length === 0) { toast("Add nodes before exporting", "error"); return; }
-            const spec = generateMissionSpec({ nodes: flow.nodes, connections: flow.connections }, NODE_DEFS);
-            const steps = spec.topological_order.map((nodeId, i) => {
-              const node = flow.nodes.find(n => n.id === nodeId);
-              const def = getNodeDef(node?.type);
-              return { step: i + 1, type: node?.type || "unknown", label: def?.label || node?.type || "unknown", params: node?.params || {} };
-            });
-            const output = { mission: "Corelyn Robotics Mission", exported_at: new Date().toISOString(), total_steps: steps.length, steps };
-            const blob = new Blob([JSON.stringify(output, null, 2)], { type: "application/json" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = `mission_export_${Date.now()}.json`;
-            a.click();
-            URL.revokeObjectURL(url);
-            toast(`${steps.length} steps exported`, "success");
-            addLog(`📋 Exported ${steps.length} step-by-step instructions`, "info");
-          }} disabled={flow.nodes.length === 0} accent="#0891b2" title="Export mission as JSON">⬇ Export</TopBtn>
-          <div style={{ width: 1, height: 20, background: "var(--border)" }} />
+        <div className="topbar-toolbar" style={{ display: "flex", alignItems: "center", gap: 4, background: "var(--panel-bg)", border: "1px solid var(--border)", borderRadius: 8, padding: 3, flexShrink: 0, whiteSpace: "nowrap" }}>
           <input ref={importInputRef} type="file" accept=".json" style={{ display: "none" }} onChange={handleImport} />
-          <TopBtn onClick={() => importInputRef.current?.click()} accent="#8BA2AC" title="Import nodes from JSON">📥 Import</TopBtn>
-          <div style={{ width: 1, height: 20, background: "var(--border)" }} />
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            {connectionState.isSelectingTarget && <span style={{ fontSize: 14, color: "#3b82f6", fontWeight: 600, letterSpacing: "0.04em", whiteSpace: "nowrap" }}>TAP→</span>}
-            <button onClick={() => setChainMode(c => !c)} title="Chain mode — auto-advance source after connection"
-              style={{ padding: "2px 6px", borderRadius: 4, border: chainMode ? "1px solid #3b82f6" : "1px solid var(--border)", background: chainMode ? "rgba(59,130,246,0.08)" : "transparent", color: chainMode ? "#3b82f6" : "var(--text-muted)", cursor: "pointer", fontSize: 14, fontFamily: "'Inter', sans-serif", fontWeight: 700, letterSpacing: "0.04em", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)", whiteSpace: "nowrap" }}>
-              {chainMode ? "CHAIN ⛓" : "CHAIN"}
-            </button>
-          </div>
+          {!isNarrow && (
+            <>
+              <TopBtn onClick={handleClearCanvas} title="Clear canvas">{isCompact ? "⊠" : "⊠ Clear"}</TopBtn>
+              <div style={{ width: 1, height: 20, background: "var(--border)" }} />
+            </>
+          )}
+          <TopBtn onClick={runMission} disabled={missionRunning} accent="#10b981" title="Run mission">{isCompact ? "▶" : (backendOnline ? "▶ Run" : "▶ Demo Run")}</TopBtn>
+          <TopBtn onClick={stopMission} disabled={!missionRunning} accent="#dc2626" title="Stop">{isCompact ? "■" : "■ Stop"}</TopBtn>
+          <TopBtn onClick={() => setDeployModalOpen(true)} disabled={flow.nodes.length === 0} accent="#8b5cf6" title="Deploy mission to robot">{isCompact ? "🚀" : "🚀 Deploy"}</TopBtn>
+          {!isNarrow && (
+            <>
+              <TopBtn onClick={handleExportMission} disabled={flow.nodes.length === 0} accent="#0891b2" title="Export mission as JSON">{isCompact ? "⬇" : "⬇ Export"}</TopBtn>
+              <div style={{ width: 1, height: 20, background: "var(--border)" }} />
+              <TopBtn onClick={handleImportClick} accent="#8BA2AC" title="Import nodes from JSON">{isCompact ? "📥" : "📥 Import"}</TopBtn>
+              <div style={{ width: 1, height: 20, background: "var(--border)" }} />
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                {connectionState.isSelectingTarget && <span style={{ fontSize: 14, color: "#3b82f6", fontWeight: 600, letterSpacing: "0.04em", whiteSpace: "nowrap" }}>TAP→</span>}
+                <button onClick={handleToggleChain} title="Chain mode — auto-advance source after connection"
+                  style={{ padding: "2px 6px", borderRadius: 4, border: chainMode ? "1px solid #3b82f6" : "1px solid var(--border)", background: chainMode ? "rgba(59,130,246,0.08)" : "transparent", color: chainMode ? "#3b82f6" : "var(--text-muted)", cursor: "pointer", fontSize: 14, fontFamily: "'Inter', sans-serif", fontWeight: 700, letterSpacing: "0.04em", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)", whiteSpace: "nowrap" }}>
+                  {isCompact ? "⛓" : (chainMode ? "CHAIN ⛓" : "CHAIN")}
+                </button>
+              </div>
+            </>
+          )}
         </div>
 
         <div style={{ flex: 1 }} />
 
         {/* Stats - desktop only */}
-        <div className="topbar-stats-desktop" style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-          {[["BATT", `${Math.round(amr.battery)}%`, battColor], ["VEL", `${amr.speed.toFixed(2)}m/s`, "#3b82f6"], ["CONNS", flow.connections.length, "#7c3aed"]].map(([l, v, c]) => (
-            <div key={l} style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 8px", background: "var(--panel-bg)", border: "1px solid var(--border)", borderRadius: 5, fontSize: 14, whiteSpace: "nowrap" }}>
-              <span style={{ color: "var(--text-muted)" }}>{l}</span>
-              <span style={{ color: c, fontWeight: 700 }}>{v}</span>
-            </div>
-          ))}
-        </div>
+        {!isNarrow && (
+          <div className="topbar-telemetry" style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+            {telemetryItems.map(([l, v, c]) => (
+              <div key={l} className="topbar-telemetry-pill" style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 8px", background: "var(--panel-bg)", border: "1px solid var(--border)", borderRadius: 5, fontSize: 14, whiteSpace: "nowrap" }}>
+                <span style={{ color: "var(--text-muted)" }}>{l}</span>
+                <span style={{ color: c, fontWeight: 700 }}>{v}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Desktop sidebar toggle */}
         <button className="topbar-desktop-only" onClick={() => setSidebarOpen(s => !s)} style={{ padding: "5px 8px", background: "transparent", border: "1px solid var(--border)", borderRadius: 5, color: "var(--text-soft)", cursor: "pointer", fontSize: 14, transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
@@ -1034,6 +1084,47 @@ export default function RobotHMI() {
             ⚙
           </button>
         </div>
+
+        {/* Narrow-width overflow menu — Clear/Export/Import/CHAIN/telemetry, next to Settings */}
+        {isNarrow && (
+          <div className="topbar-overflow" ref={overflowMenuRef}>
+            <button
+              className={`settings-tab-button ${overflowMenuOpen ? "settings-tab-button-active" : ""}`}
+              onClick={() => setOverflowMenuOpen(o => !o)}
+              title="More actions"
+              type="button"
+              aria-expanded={overflowMenuOpen}
+            >
+              <span aria-hidden="true">⋯</span>
+            </button>
+            {overflowMenuOpen && (
+              <div className="topbar-overflow-menu">
+                <div className="topbar-overflow-telemetry-item">
+                  <span style={{ color: "var(--text-muted)" }}>MISSION</span>
+                  <span style={{ color: "var(--text-soft)", fontWeight: 700 }}>{missionRunning ? "RUNNING" : "IDLE"} · {flow.nodes.length}</span>
+                </div>
+                <div className="topbar-overflow-telemetry-item">
+                  <span style={{ color: "var(--text-muted)" }}>BACKEND</span>
+                  <span style={{ color: backendOnline ? "#10b981" : "#d97706", fontWeight: 700 }}>{backendOnline ? "API ONLINE" : "DEMO MODE"}</span>
+                </div>
+                <div className="topbar-overflow-divider" />
+                <TopBtn onClick={() => { handleClearCanvas(); setOverflowMenuOpen(false); }} title="Clear canvas">⊠ Clear</TopBtn>
+                <TopBtn onClick={() => { handleExportMission(); setOverflowMenuOpen(false); }} disabled={flow.nodes.length === 0} accent="#0891b2" title="Export mission as JSON">⬇ Export</TopBtn>
+                <TopBtn onClick={() => { handleImportClick(); setOverflowMenuOpen(false); }} accent="#8BA2AC" title="Import nodes from JSON">📥 Import</TopBtn>
+                <button className="topbar-overflow-chain" onClick={handleToggleChain} title="Chain mode — auto-advance source after connection">
+                  {chainMode ? "CHAIN ⛓" : "CHAIN"}
+                </button>
+                <div className="topbar-overflow-divider" />
+                {telemetryItems.map(([l, v, c]) => (
+                  <div key={l} className="topbar-overflow-telemetry-item">
+                    <span style={{ color: "var(--text-muted)" }}>{l}</span>
+                    <span style={{ color: c, fontWeight: 700 }}>{v}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <button
           className={`settings-tab-button ${settingsOpen ? "settings-tab-button-active" : ""}`}

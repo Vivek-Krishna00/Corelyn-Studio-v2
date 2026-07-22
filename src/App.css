@@ -901,7 +901,6 @@ body {
   }
   .zoom-controls { bottom: 24px !important; }
   .topbar-desktop-only { display: none !important; }
-  .topbar-stats-desktop { display: none !important; }
   .topbar-mobile-toggle { display: flex !important; }
   .settings-backdrop {
     align-items: stretch;
@@ -929,6 +928,95 @@ body {
   .settings-actions {
     flex-direction: column;
   }
+}
+
+/* ── Top bar: compact tier (<1200px) — hide the tagline, shrink the
+   telemetry/status pills, tighten the row's own gap/padding. Pure CSS.
+   (App.jsx's isCompact flag drives a second, JS-side pass at the same
+   breakpoint — swapping Clear/Export/Import/Run/Stop/Deploy/CHAIN down to
+   icon-only labels — because text-node content can't be swapped from CSS.
+   Both were needed: even after every rule below, Run+Stop+Deploy's full
+   labels alone left the row still clipping at 1000-1199px.) ── */
+@media (max-width: 1199px) {
+  .topbar-tagline { display: none; }
+  .topbar-logo { min-width: 0 !important; }
+  .topbar-telemetry-pill,
+  .topbar-status-pill {
+    padding: 2px 6px !important;
+    font-size: 12px !important;
+  }
+  .topbar-row {
+    padding-left: 8px;
+    padding-right: 8px;
+    gap: 4px;
+  }
+  .settings-tab-button {
+    padding: 6px 8px;
+  }
+}
+
+/* ── Top bar: narrow tier (<1000px) — Clear/Export/Import/CHAIN/telemetry
+   move into the ⋯ overflow menu (see useBreakpoint's NARROW_MAX_WIDTH,
+   which gates the JSX that renders this menu instead of the toolbar row). ── */
+
+.topbar-overflow {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.topbar-overflow-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 400;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-bg-strong);
+  box-shadow: var(--shadow-floating);
+  animation: fadeIn 0.12s ease;
+}
+
+.topbar-overflow-menu > button {
+  width: 100%;
+  text-align: left;
+}
+
+.topbar-overflow-chain {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.topbar-overflow-chain:hover {
+  background: var(--button-hover);
+  color: var(--text-main);
+}
+
+.topbar-overflow-divider {
+  height: 1px;
+  margin: 2px 0;
+  background: var(--border);
+}
+
+.topbar-overflow-telemetry-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 10px;
+  font-size: 14px;
 }
 
 /* ── Desktop: 1024px and up ── */

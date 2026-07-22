@@ -12,8 +12,8 @@ function createWindow(apiPort) {
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
-    minWidth: 1024,
-    minHeight: 680,
+    minWidth: 700,
+    minHeight: 550,
     backgroundColor: '#141414', // matches canvas bg -> avoids white flash on load
     autoHideMenuBar: true,
     show: false,
