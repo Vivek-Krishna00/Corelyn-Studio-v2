@@ -1,0 +1,31 @@
+{
+  "mission_id": "mission_1750000000000_4fzz",
+  "spec_version": "1.0.0",
+  "created_at": "2026-07-22T00:00:00.000Z",
+  "robot_requirements": {
+    "min_battery_pct": 15,
+    "required_capabilities": [
+      "basic_execution"
+    ]
+  },
+  "topological_order": [
+    "n_start"
+  ],
+  "nodes": [
+    {
+      "id": "n_start",
+      "type": "start",
+      "label": "Start",
+      "category": "flow",
+      "params": {
+        "workflow_id": "mission_001",
+        "initial_pose_estimate": "0.0,0.0,0.0"
+      },
+      "position": {
+        "x": 120,
+        "y": 80
+      }
+    }
+  ],
+  "connections": []
+}

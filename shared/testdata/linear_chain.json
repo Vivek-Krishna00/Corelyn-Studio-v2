@@ -1,0 +1,100 @@
+{
+  "mission_id": "mission_1750000000000_4fzz",
+  "spec_version": "1.0.0",
+  "created_at": "2026-07-22T00:00:00.000Z",
+  "robot_requirements": {
+    "min_battery_pct": 15,
+    "required_capabilities": [
+      "basic_execution",
+      "linear_motion",
+      "angular_motion"
+    ]
+  },
+  "topological_order": [
+    "n_start",
+    "n_fwd",
+    "n_rot",
+    "n_end"
+  ],
+  "nodes": [
+    {
+      "id": "n_start",
+      "type": "start",
+      "label": "Start",
+      "category": "flow",
+      "params": {
+        "workflow_id": "mission_001",
+        "initial_pose_estimate": "0.0,0.0,0.0"
+      },
+      "position": {
+        "x": 100,
+        "y": 61
+      }
+    },
+    {
+      "id": "n_fwd",
+      "type": "move_forward",
+      "label": "Move Forward",
+      "category": "motion",
+      "params": {
+        "distance": 1,
+        "linear_velocity": 0.5
+      },
+      "position": {
+        "x": 401,
+        "y": 60
+      }
+    },
+    {
+      "id": "n_rot",
+      "type": "rotate_left",
+      "label": "Rotate Left",
+      "category": "motion",
+      "params": {
+        "angular_velocity": 0.5,
+        "direction": "CCW"
+      },
+      "position": {
+        "x": 701,
+        "y": 61
+      }
+    },
+    {
+      "id": "n_end",
+      "type": "end",
+      "label": "End",
+      "category": "flow",
+      "params": {
+        "terminate_status": "success",
+        "trigger_callback_hook": "/mission/complete"
+      },
+      "position": {
+        "x": 1000,
+        "y": 61
+      }
+    }
+  ],
+  "connections": [
+    {
+      "id": "c_n_start_out__n_fwd_in",
+      "from_node": "n_start",
+      "from_port": "out",
+      "to_node": "n_fwd",
+      "to_port": "in"
+    },
+    {
+      "id": "c_n_fwd_out__n_rot_in",
+      "from_node": "n_fwd",
+      "from_port": "out",
+      "to_node": "n_rot",
+      "to_port": "in"
+    },
+    {
+      "id": "c_n_rot_out__n_end_in",
+      "from_node": "n_rot",
+      "from_port": "out",
+      "to_node": "n_end",
+      "to_port": "in"
+    }
+  ]
+}

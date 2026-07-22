@@ -1,0 +1,100 @@
+{
+  "mission_id": "mission_1750000000000_4fzz",
+  "spec_version": "1.0.0",
+  "created_at": "2026-07-22T00:00:00.000Z",
+  "robot_requirements": {
+    "min_battery_pct": 15,
+    "required_capabilities": [
+      "linear_motion",
+      "angular_motion",
+      "basic_execution"
+    ]
+  },
+  "topological_order": [
+    "n_d",
+    "n_a",
+    "n_b",
+    "n_c"
+  ],
+  "nodes": [
+    {
+      "id": "n_a",
+      "type": "move_forward",
+      "label": "Move Forward",
+      "category": "motion",
+      "params": {
+        "distance": 1,
+        "linear_velocity": 0.5
+      },
+      "position": {
+        "x": 100,
+        "y": 100
+      }
+    },
+    {
+      "id": "n_b",
+      "type": "rotate_left",
+      "label": "Rotate Left",
+      "category": "motion",
+      "params": {
+        "angular_velocity": 0.5,
+        "direction": "CCW"
+      },
+      "position": {
+        "x": 400,
+        "y": 100
+      }
+    },
+    {
+      "id": "n_c",
+      "type": "rotate_right",
+      "label": "Rotate Right",
+      "category": "motion",
+      "params": {
+        "angular_velocity": 0.5,
+        "direction": "CW"
+      },
+      "position": {
+        "x": 700,
+        "y": 100
+      }
+    },
+    {
+      "id": "n_d",
+      "type": "wait_delay",
+      "label": "Wait / Delay",
+      "category": "control",
+      "params": {
+        "duration_ms": 2000,
+        "non_blocking_execution": false
+      },
+      "position": {
+        "x": 400,
+        "y": 400
+      }
+    }
+  ],
+  "connections": [
+    {
+      "id": "c_n_a_out__n_b_in",
+      "from_node": "n_a",
+      "from_port": "out",
+      "to_node": "n_b",
+      "to_port": "in"
+    },
+    {
+      "id": "c_n_b_out__n_c_in",
+      "from_node": "n_b",
+      "from_port": "out",
+      "to_node": "n_c",
+      "to_port": "in"
+    },
+    {
+      "id": "c_n_c_out__n_a_in",
+      "from_node": "n_c",
+      "from_port": "out",
+      "to_node": "n_a",
+      "to_port": "in"
+    }
+  ]
+}

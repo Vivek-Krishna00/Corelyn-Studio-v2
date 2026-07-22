@@ -1,0 +1,398 @@
+{
+  "mission_id": "mission_1750000000000_4fzz",
+  "spec_version": "1.0.0",
+  "created_at": "2026-07-22T00:00:00.000Z",
+  "robot_requirements": {
+    "min_battery_pct": 15,
+    "required_capabilities": [
+      "basic_execution",
+      "linear_motion",
+      "angular_motion",
+      "speed_control",
+      "navigation",
+      "docking",
+      "payload_handling",
+      "charging",
+      "sensor_battery",
+      "sensor_obstacle",
+      "sensor_localization"
+    ]
+  },
+  "topological_order": [
+    "n_start",
+    "n_end",
+    "n_move_forward",
+    "n_move_backward",
+    "n_rotate_left",
+    "n_rotate_right",
+    "n_set_speed",
+    "n_stop",
+    "n_go_to_waypoint",
+    "n_return_to_home",
+    "n_set_home_station",
+    "n_dock_at_station",
+    "n_undock",
+    "n_wait_at_station",
+    "n_pick_up_cargo",
+    "n_drop_cargo",
+    "n_go_charge",
+    "n_loop_start",
+    "n_loop_end",
+    "n_wait_delay",
+    "n_emit_event",
+    "n_check_battery",
+    "n_detect_obstacle",
+    "n_read_position"
+  ],
+  "nodes": [
+    {
+      "id": "n_start",
+      "type": "start",
+      "label": "Start",
+      "category": "flow",
+      "params": {
+        "workflow_id": "mission_001",
+        "initial_pose_estimate": "0.0,0.0,0.0"
+      },
+      "position": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "n_end",
+      "type": "end",
+      "label": "End",
+      "category": "flow",
+      "params": {
+        "terminate_status": "success",
+        "trigger_callback_hook": "/mission/complete"
+      },
+      "position": {
+        "x": 300,
+        "y": 0
+      }
+    },
+    {
+      "id": "n_move_forward",
+      "type": "move_forward",
+      "label": "Move Forward",
+      "category": "motion",
+      "params": {
+        "distance": 1,
+        "linear_velocity": 0.5
+      },
+      "position": {
+        "x": 600,
+        "y": 0
+      }
+    },
+    {
+      "id": "n_move_backward",
+      "type": "move_backward",
+      "label": "Move Backward",
+      "category": "motion",
+      "params": {
+        "distance": 0.5,
+        "linear_velocity": 0.3
+      },
+      "position": {
+        "x": 900,
+        "y": 0
+      }
+    },
+    {
+      "id": "n_rotate_left",
+      "type": "rotate_left",
+      "label": "Rotate Left",
+      "category": "motion",
+      "params": {
+        "angular_velocity": 0.5,
+        "direction": "CCW"
+      },
+      "position": {
+        "x": 0,
+        "y": 140
+      }
+    },
+    {
+      "id": "n_rotate_right",
+      "type": "rotate_right",
+      "label": "Rotate Right",
+      "category": "motion",
+      "params": {
+        "angular_velocity": 0.5,
+        "direction": "CW"
+      },
+      "position": {
+        "x": 300,
+        "y": 140
+      }
+    },
+    {
+      "id": "n_set_speed",
+      "type": "set_speed",
+      "label": "Set Speed",
+      "category": "motion",
+      "params": {
+        "max_linear_velocity": 1,
+        "max_angular_velocity": 1.5
+      },
+      "position": {
+        "x": 600,
+        "y": 140
+      }
+    },
+    {
+      "id": "n_stop",
+      "type": "stop",
+      "label": "Stop",
+      "category": "motion",
+      "params": {
+        "brake_type": "controlled",
+        "deceleration_rate": 0.5
+      },
+      "position": {
+        "x": 900,
+        "y": 140
+      }
+    },
+    {
+      "id": "n_go_to_waypoint",
+      "type": "go_to_waypoint",
+      "label": "Go to Waypoint",
+      "category": "navigation",
+      "params": {
+        "waypoint_id": "WP-01",
+        "coordinates_xy": "10.5,20.3"
+      },
+      "position": {
+        "x": 0,
+        "y": 280
+      }
+    },
+    {
+      "id": "n_return_to_home",
+      "type": "return_to_home",
+      "label": "Return to Home",
+      "category": "navigation",
+      "params": {
+        "home_station_id": "home_01",
+        "route_preference": "shortest"
+      },
+      "position": {
+        "x": 300,
+        "y": 280
+      }
+    },
+    {
+      "id": "n_set_home_station",
+      "type": "set_home_station",
+      "label": "Set Home Station",
+      "category": "navigation",
+      "params": {
+        "current_gps_coordinates": "47.6062,-122.3321",
+        "map_layer_id": "floor_1",
+        "save_current_pose_as_home": true
+      },
+      "position": {
+        "x": 600,
+        "y": 280
+      }
+    },
+    {
+      "id": "n_dock_at_station",
+      "type": "dock_at_station",
+      "label": "Dock at Station",
+      "category": "agv_amr",
+      "params": {
+        "station_id": "dock_A",
+        "charging_contacts_engage": true,
+        "alignment_precision_mm": 5
+      },
+      "position": {
+        "x": 900,
+        "y": 280
+      }
+    },
+    {
+      "id": "n_undock",
+      "type": "undock",
+      "label": "Undock",
+      "category": "agv_amr",
+      "params": {
+        "exit_clearance_distance": 0.5,
+        "reverse_speed": 0.15,
+        "post_undock_pose_check": true
+      },
+      "position": {
+        "x": 0,
+        "y": 420
+      }
+    },
+    {
+      "id": "n_wait_at_station",
+      "type": "wait_at_station",
+      "label": "Wait at Station",
+      "category": "agv_amr",
+      "params": {
+        "station_id": "dock_A",
+        "wait_duration": 10,
+        "release_condition": "timer"
+      },
+      "position": {
+        "x": 300,
+        "y": 420
+      }
+    },
+    {
+      "id": "n_pick_up_cargo",
+      "type": "pick_up_cargo",
+      "label": "Pick Up Cargo",
+      "category": "agv_amr",
+      "params": {
+        "actuator_mechanism": "lift_fork",
+        "load_weight_sensor_threshold": 50,
+        "clamp_force_pct": 75
+      },
+      "position": {
+        "x": 600,
+        "y": 420
+      }
+    },
+    {
+      "id": "n_drop_cargo",
+      "type": "drop_cargo",
+      "label": "Drop Cargo",
+      "category": "agv_amr",
+      "params": {
+        "offload_direction": "forward",
+        "validation_sensor_check": true,
+        "clearance_timeout_ms": 5000
+      },
+      "position": {
+        "x": 900,
+        "y": 420
+      }
+    },
+    {
+      "id": "n_go_charge",
+      "type": "go_charge",
+      "label": "Go Charge",
+      "category": "agv_amr",
+      "params": {
+        "battery_station_target_id": "charger_01",
+        "threshold_trigger_pct": 20,
+        "fast_charge_override": false
+      },
+      "position": {
+        "x": 0,
+        "y": 560
+      }
+    },
+    {
+      "id": "n_loop_start",
+      "type": "loop_start",
+      "label": "Loop Start",
+      "category": "control",
+      "params": {
+        "loop_count": 3,
+        "break_on_error": false,
+        "evaluation_condition_string": "iteration < count"
+      },
+      "position": {
+        "x": 300,
+        "y": 560
+      }
+    },
+    {
+      "id": "n_loop_end",
+      "type": "loop_end",
+      "label": "Loop End",
+      "category": "control",
+      "params": {
+        "target_loop_start_id": "",
+        "nested_level": 1
+      },
+      "position": {
+        "x": 600,
+        "y": 560
+      }
+    },
+    {
+      "id": "n_wait_delay",
+      "type": "wait_delay",
+      "label": "Wait / Delay",
+      "category": "control",
+      "params": {
+        "duration_ms": 2000,
+        "non_blocking_execution": false
+      },
+      "position": {
+        "x": 900,
+        "y": 560
+      }
+    },
+    {
+      "id": "n_emit_event",
+      "type": "emit_event",
+      "label": "Emit Event",
+      "category": "control",
+      "params": {
+        "event_topic": "/robot/status",
+        "payload_json": "{\"status\":\"complete\"}",
+        "broadcast_severity": "info"
+      },
+      "position": {
+        "x": 0,
+        "y": 700
+      }
+    },
+    {
+      "id": "n_check_battery",
+      "type": "check_battery",
+      "label": "Check Battery",
+      "category": "sensing",
+      "params": {
+        "alert_voltage_threshold": 24,
+        "low_battery_routing_action": "go_to_charge",
+        "telemetry_interval_ms": 1000
+      },
+      "position": {
+        "x": 300,
+        "y": 700
+      }
+    },
+    {
+      "id": "n_detect_obstacle",
+      "type": "detect_obstacle",
+      "label": "Detect Obstacle",
+      "category": "sensing",
+      "params": {
+        "sensor_input_source": "LiDAR",
+        "detection_range_meters": 2,
+        "field_of_view_deg": 270
+      },
+      "position": {
+        "x": 600,
+        "y": 700
+      }
+    },
+    {
+      "id": "n_read_position",
+      "type": "read_position",
+      "label": "Read Position",
+      "category": "sensing",
+      "params": {
+        "localization_source": "AMCL",
+        "publish_to_dashboard": true,
+        "accuracy_threshold_mm": 50
+      },
+      "position": {
+        "x": 900,
+        "y": 700
+      }
+    }
+  ],
+  "connections": []
+}
