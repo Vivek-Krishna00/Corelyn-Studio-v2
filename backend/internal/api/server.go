@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sync"
 
 	"corelynstudio/backend/internal/auth"
@@ -80,9 +81,44 @@ func New(deps Deps) *Server {
 	return s
 }
 
+// allowedBrowserOrigin reports whether a browser at this Origin may call the
+// API. The packaged renderer loads over file:// and sends no usable Origin;
+// `npm run dev` and `npm run electron:dev` serve it from the Vite port while
+// the daemon answers on its own, which is cross-origin and needs saying so
+// explicitly. Same policy as the status WebSocket — see statusWSOrigins.
+func allowedBrowserOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
 // ServeHTTP satisfies http.Handler so main.go can hand the Server straight
-// to http.Server.
+// to http.Server, and applies the CORS policy on the way through.
+//
+// Without this, every request the renderer makes under `npm run electron:dev`
+// fails: a JSON body makes the request preflighted, and an OPTIONS the mux
+// does not route is a 405 the browser reports as "Failed to fetch".
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if origin := r.Header.Get("Origin"); origin != "" && allowedBrowserOrigin(origin) {
+		h := w.Header()
+		h.Set("Access-Control-Allow-Origin", origin)
+		h.Add("Vary", "Origin")
+		h.Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		h.Set("Access-Control-Max-Age", "600")
+	}
+
+	// Answer the preflight whether or not the origin was allowed — a bare 204
+	// with no Allow-Origin header is what a refusal looks like to a browser,
+	// and it is clearer than a 405 about an OPTIONS route that does not exist.
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	s.mux.ServeHTTP(w, r)
 }
 
