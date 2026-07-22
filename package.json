@@ -20,15 +20,16 @@
     "electron:build": "vite build && electron-builder",
     "electron:build:mac": "vite build && electron-builder --mac",
     "electron:build:win": "vite build && electron-builder --win",
-    "electron:build:linux": "vite build && electron-builder --linux"
+    "electron:build:linux": "vite build && electron-builder --linux",
+    "test:e2e": "vite build && playwright test"
   },
   "dependencies": {
     "react": "^19.2.6",
-    "react-dom": "^19.2.6",
-    "roslib": "^2.1.0"
+    "react-dom": "^19.2.6"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.61.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
@@ -61,13 +62,19 @@
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
-      "target": ["dmg"]
+      "target": [
+        "dmg"
+      ]
     },
     "win": {
-      "target": ["nsis"]
+      "target": [
+        "nsis"
+      ]
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "category": "Development",
       "maintainer": "Corelyn Robotics <team@corelynrobotics.com>"
     }

@@ -1,43 +1,12 @@
 import { useState, useRef, useCallback, useEffect, useReducer, useMemo } from "react";
 import corelynLogo from "./assets/images/corelyn_logo.png";
 import "./App.css";
-import { ROSProvider, useROS } from "./ros/rosBridge";
+import * as api from "./api/client";
 import DeployModal from "./ros/DeployModal";
 import { generateMissionSpec } from "./ros/missionSpec";
 import LoginPage from "./LoginPage";
 import SignupPage from "./SignupPage";
 import nodeData from "../shared/nodes.json";
-
-// ─── ENV ────────────────────────────────────────────────────────────────────
-
-const DEFAULT_API_URL = "http://localhost:8000";
-
-function normalizeServiceUrl(value, fallback, allowedProtocols) {
-  const raw = typeof value === "string" ? value.trim() : "";
-  if (!raw || /[<>]/.test(raw)) return fallback;
-  try {
-    const parsed = new URL(raw);
-    if (!allowedProtocols.includes(parsed.protocol) || !parsed.hostname) return fallback;
-    return parsed.origin;
-  } catch {
-    return fallback;
-  }
-}
-
-function apiUrlToWsUrl(apiUrl) {
-  return apiUrl.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
-}
-
-function buildMissionStatusWsUrl(baseUrl) {
-  try {
-    return new URL("/ws/mission/status", baseUrl).toString();
-  } catch {
-    return null;
-  }
-}
-
-const API_URL = normalizeServiceUrl(import.meta.env.VITE_API_URL, DEFAULT_API_URL, ["http:", "https:"]);
-const WS_URL = normalizeServiceUrl(import.meta.env.VITE_WS_URL, apiUrlToWsUrl(API_URL), ["ws:", "wss:"]);
 
 // ─── TYPES & CONSTANTS ───────────────────────────────────────────────────────
 
@@ -854,9 +823,8 @@ export default function RobotHMI() {
     setRightTab("props");
   }, [isMobile]);
 
-  // ── Mission execution → remote robot via rosbridge ──
-  const demoCancelRef = useRef(false);
-
+  // ── Mission execution → the daemon, which drives the robot (or the mockbot
+  //    in DEMO MODE — same code path either way, spec §3.3) ──
   const runMission = async () => {
     if (flow.nodes.length === 0) { toast("Add nodes to the canvas first", "error"); return; }
     if (missionRunning) return;
@@ -871,74 +839,25 @@ export default function RobotHMI() {
     flow.nodes.forEach(n => dispatch({ type: "SET_STATUS", nodeId: n.id, status: "idle" }));
     setMissionRunning(true);
 
-    if (backendOnline) {
-      addLog("▶ Deploying mission to robot...", "success");
-      toast("Deploying mission to robot...", "info");
-      try {
-        const res = await fetch(`${API_URL}/api/deploy`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(spec),
-        });
-        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || "Deploy failed");
-        addLog("✓ Mission deployed — robot executing", "success");
-        toast("Robot executing mission", "success");
-      } catch (err) {
-        addLog(`✗ Deploy failed: ${err.message}`, "error");
-        toast(`Deploy failed: ${err.message}`, "error");
-        setMissionRunning(false);
-      }
-      return;
+    addLog("▶ Deploying mission to robot...", "success");
+    toast("Deploying mission to robot...", "info");
+    try {
+      await api.deploy(spec);
+      addLog("✓ Mission deployed — robot executing", "success");
+      toast("Robot executing mission", "success");
+    } catch (err) {
+      addLog(`✗ Deploy failed: ${err.message}`, "error");
+      toast(`Deploy failed: ${err.message}`, "error");
+      setMissionRunning(false);
     }
-
-    // ── Demo mode: simulate nodes locally ──
-    addLog("▶ Demo mode — simulating mission locally", "info");
-    toast("Demo: simulating mission...", "info");
-    demoCancelRef.current = false;
-
-    for (let i = 0; i < order.length; i++) {
-      if (demoCancelRef.current) break;
-      const nodeId = order[i];
-      const node = flow.nodes.find(n => n.id === nodeId);
-      const def = node && getNodeDef(node.type);
-      dispatch({ type: "SET_STATUS", nodeId, status: "running" });
-      addLog(`▶ ${def?.label || nodeId}: executing...`, "info");
-
-      await new Promise(resolve => {
-        const dur = def?.type === "wait_delay"
-          ? Math.min(parseInt(String(node?.params?.duration_ms)) || 2000, 5000)
-          : 1500;
-        const check = setInterval(() => {
-          if (demoCancelRef.current) { clearInterval(check); resolve(); return; }
-        }, 100);
-        setTimeout(() => { clearInterval(check); resolve(); }, dur);
-      });
-
-      if (demoCancelRef.current) break;
-      dispatch({ type: "SET_STATUS", nodeId, status: "done" });
-      addLog(`✓ ${def?.label || nodeId}: done`, "success");
-    }
-
-    if (!demoCancelRef.current) {
-      addLog("✓ Demo mission complete", "success");
-      toast("Demo mission complete", "success");
-    }
-    setMissionRunning(false);
   };
 
   const stopMission = () => {
-    demoCancelRef.current = true;
     setMissionRunning(false);
     flow.nodes.forEach(n => dispatch({ type: "SET_STATUS", nodeId: n.id, status: "idle" }));
     addLog("■ Mission stopped", "warn");
     toast("Mission stopped", "error");
-    if (backendOnline) {
-      fetch(`${API_URL}/api/deploy`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mission_id: "__cancel__", command: "cancel" }),
-      }).catch(() => {});
-    }
+    api.cancel().catch(() => {});
   };
 
   // ── Keyboard ──
@@ -1104,8 +1023,8 @@ export default function RobotHMI() {
   useEffect(() => {
     let mounted = true;
     const poll = () => {
-      fetch(`${API_URL}/api/health`, { signal: AbortSignal.timeout(3000) })
-        .then(r => r.json()).then(d => { if (mounted) setBackendOnline(d.status === "ok"); })
+      api.health()
+        .then(ok => { if (mounted) setBackendOnline(ok); })
         .catch(() => { if (mounted) setBackendOnline(false); });
     };
     poll();
@@ -1118,46 +1037,36 @@ export default function RobotHMI() {
   dispatchRef.current = dispatch;
   const flowsRef = useRef(flow);
   flowsRef.current = flow;
-  useEffect(() => {
-    let ws = null;
-    let mounted = true;
-    const missionStatusWsUrl = buildMissionStatusWsUrl(WS_URL);
+  useEffect(() => api.connectStatus((data) => {
+    dispatchRef.current({ type: "SET_STATUS", nodeId: data.node_id, status: data.status });
 
-    const connect = () => {
-      if (!mounted || !missionStatusWsUrl) return;
-      try {
-        ws = new WebSocket(missionStatusWsUrl);
-      } catch (error) {
-        console.warn("Mission status WebSocket disabled:", error);
-        return;
+    if (data.node_id === "__mission__") {
+      // Terminal events end the run. `disconnected` and `estop` are the fault
+      // paths (spec §8.1) — the robot link is gone or latched, so the run is
+      // over whether or not the operator asked for it.
+      if (data.status === "complete" || data.status === "cancelled") {
+        setMissionRunning(false);
+        addLog(`✓ Mission ${data.status}`, "success");
+        toast(`Mission ${data.status}`, "success");
+      } else if (data.status === "disconnected") {
+        setMissionRunning(false);
+        addLog("✗ Robot link lost — mission interrupted", "error");
+        toast("Robot disconnected", "error");
+      } else if (data.status === "estop") {
+        setMissionRunning(false);
+        addLog("✗ E-Stop engaged on the robot", "error");
+        toast("E-Stop engaged", "error");
       }
-      ws.onmessage = (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          if (!data.node_id || !data.status) return;
-          dispatchRef.current({ type: "SET_STATUS", nodeId: data.node_id, status: data.status });
-          if (data.node_id === "__mission__") {
-            if (data.status === "complete" || data.status === "cancelled") {
-              setMissionRunning(false);
-              addLog(`✓ Mission ${data.status}`, "success");
-              toast(`Mission ${data.status}`, "success");
-            }
-            return;
-          }
-          const node = flowsRef.current.nodes.find(n => n.id === data.node_id);
-          if (node) {
-            const def = getNodeDef(node.type);
-            const icon = data.status === "running" ? "▶" : data.status === "done" ? "✓" : "✗";
-            addLog(`${icon} ${def?.label || node.type}: ${data.status}`, data.status === "done" ? "success" : data.status === "error" ? "error" : "info");
-          }
-        } catch (_) {}
-      };
-      ws.onclose = () => { setTimeout(connect, 3000); };
-      ws.onerror = () => { ws?.close(); };
-    };
-    connect();
-    return () => { mounted = false; ws?.close(); };
-  }, []);
+      return;
+    }
+
+    const node = flowsRef.current.nodes.find(n => n.id === data.node_id);
+    if (node) {
+      const def = getNodeDef(node.type);
+      const icon = data.status === "running" ? "▶" : data.status === "done" ? "✓" : "✗";
+      addLog(`${icon} ${def?.label || node.type}: ${data.status}`, data.status === "done" ? "success" : data.status === "error" ? "error" : "info");
+    }
+  }), []);
 
   // ── Right panel content (shared between mobile drawer and desktop sidebar) ──
   const renderRightPanelContent = () => (
@@ -1290,7 +1199,6 @@ export default function RobotHMI() {
   }
 
   return (
-    <ROSProvider>
     <div
       className={`app-shell ${editorSettings.compactPalette ? "palette-compact" : ""} ${editorSettings.animations ? "" : "motion-reduced"}`}
       data-theme={resolvedTheme}
@@ -1556,6 +1464,9 @@ export default function RobotHMI() {
                 <div
                   key={node.id}
                   className="node-touch-target"
+                  data-node-id={node.id}
+                  data-node-type={node.type}
+                  data-status={node.status || "idle"}
                   onMouseDown={e => onNodeMouseDown(e, node.id)}
                   onDoubleClick={e => onNodeDoubleClick(e, node.id)}
                   style={{
@@ -1774,7 +1685,6 @@ export default function RobotHMI() {
       )}
 
     </div>
-    </ROSProvider>
   );
 }
 
@@ -1926,32 +1836,11 @@ function SettingToggle({ label, checked, onChange }) {
 }
 
 function DeployModalWrapper({ flow, onClose }) {
-  const { connected } = useROS();
   const [apiOnline, setApiOnline] = useState(false);
   const mission = useMemo(() => generateMissionSpec(flow, NODE_DEFS), [flow]);
 
   useEffect(() => {
-    fetch(`${API_URL}/api/health`, { signal: AbortSignal.timeout(3000) })
-      .then(r => r.json()).then(d => setApiOnline(d.status === "ok"))
-      .catch(() => setApiOnline(false));
-  }, []);
-
-  const handleDeploy = useCallback(async (spec) => {
-    const res = await fetch(`${API_URL}/api/deploy`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(spec),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(err.detail || "Deploy failed");
-    }
-    return res.json();
-  }, []);
-
-  const handleDemoDeploy = useCallback(async (spec) => {
-    // Just close modal — the canvas Run button will handle demo mode
-    return { ok: true, demo: true };
+    api.health().then(setApiOnline).catch(() => setApiOnline(false));
   }, []);
 
   return (
@@ -1959,8 +1848,7 @@ function DeployModalWrapper({ flow, onClose }) {
       mission={mission}
       rosConnected={apiOnline}
       onClose={onClose}
-      onDeploy={handleDeploy}
-      onDemoDeploy={handleDemoDeploy}
+      onDeploy={api.deploy}
     />
   );
 }

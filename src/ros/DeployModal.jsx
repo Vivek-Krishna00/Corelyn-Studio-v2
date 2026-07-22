@@ -14,7 +14,7 @@ const modalCard = {
   overflow: "hidden",
 };
 
-export default function DeployModal({ mission, rosConnected, onClose, onDeploy, onDemoDeploy }) {
+export default function DeployModal({ mission, rosConnected, onClose, onDeploy }) {
   const [tab, setTab] = useState("preview");
   const [copied, setCopied] = useState(false);
   const [deploying, setDeploying] = useState(false);
@@ -46,19 +46,6 @@ export default function DeployModal({ mission, rosConnected, onClose, onDeploy, 
       setDeployResult({ ok: true, msg: "Mission deployed successfully" });
     } catch (err) {
       setDeployResult({ ok: false, msg: err.message || "Deploy failed" });
-    } finally {
-      setDeploying(false);
-    }
-  };
-
-  const handleDemoDeploy = async () => {
-    setDeploying(true);
-    setDeployResult(null);
-    try {
-      await onDemoDeploy(mission);
-      setDeployResult({ ok: true, msg: "Demo mode — close this and click Run on the canvas to simulate" });
-    } catch (err) {
-      setDeployResult({ ok: false, msg: err.message || "Demo deploy failed" });
     } finally {
       setDeploying(false);
     }
@@ -144,15 +131,6 @@ export default function DeployModal({ mission, rosConnected, onClose, onDeploy, 
               onMouseLeave={e => { e.currentTarget.style.background = "#1e1e1e"; }}>
               Download
             </button>
-            {!rosConnected && (
-              <button onClick={handleDemoDeploy}
-                disabled={deploying}
-                style={{ padding: "7px 14px", background: deploying ? "#3a3a3a" : "#f59e0b", border: "none", borderRadius: 7, color: "#1e1e1e", cursor: deploying ? "not-allowed" : "pointer", fontSize: 11, fontFamily: "'Inter', sans-serif", fontWeight: 600, transition: "all 0.15s" }}
-                onMouseEnter={e => { if (!deploying) e.currentTarget.style.background = "#d97706"; }}
-                onMouseLeave={e => { if (!deploying) e.currentTarget.style.background = "#f59e0b"; }}>
-                {deploying ? "Starting..." : "▶ Demo (Simulate)"}
-              </button>
-            )}
           </div>
           <button onClick={handleDeploy}
             disabled={!rosConnected || deploying}
