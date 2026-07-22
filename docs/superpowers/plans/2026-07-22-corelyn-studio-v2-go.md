@@ -739,7 +739,34 @@ A1 gates all of B — fixtures must be captured before code moves. E runs from t
 1. `cd backend && go test ./...` green, including all 6 golden fixtures.
 2. Every fault in spec §8.1 has a passing test asserting its defined behaviour.
 3. `npm run electron:dev` starts the sidecar; a mission deploys against mockbot and completes with node states advancing on the canvas.
-4. AppImage runs on clean Ubuntu with no external dependencies; DB under `userData`.
+4. AppImage runs on a stock Ubuntu **desktop**; DB under `userData`. See the
+   note below — "no external dependencies" as originally written is not
+   achievable by any Electron app.
 5. D2 screenshots pixel-identical to the pre-refactor baseline.
 6. Deploy, cancel, login, logout each attributable to a user in `audit_log`.
 7. Both design tracks delivered as complete screens; `BAKEOFF.md` written with a recommendation.
+
+### Note on DoD 4 — what was actually verified
+
+Checked against `ubuntu:24.04` (amd64, under emulation on an Apple Silicon
+host), against `release/linux-unpacked/` from the Task C2 build.
+
+**Holds.** The Go sidecar is fully static — `resources/bin/corelyn-studiod`
+runs on a bare `ubuntu:24.04` with nothing installed. That is the half of the
+bundle this project controls, and `CGO_ENABLED=0` is what buys it.
+
+**Does not hold as written.** The Electron binary needs 27 shared libraries the
+minimal image lacks: `libgtk-3`, `libnss3`, `libX11` and six other X libs,
+`libasound`, `libcups`, `libdrm`, `libgbm`, `libatk`, `libpango`, `libcairo`,
+`libdbus`, `libexpat`, `libxkbcommon`. Every one is stock GTK3/X11/NSS/ALSA
+desktop stack; Electron does not bundle GTK, so no Electron AppImage is free of
+these. A `ubuntu:24.04` container is a server base, not a desktop — a machine
+that could display the app has all 27 already. The criterion should read
+"stock Ubuntu desktop", which is the real deployment target.
+
+**Not verifiable here.** An actual GUI launch, for two reasons. There is no
+display in the container; and the AppImage cannot execute under Apple Silicon
+emulation at all — type-2 AppImages set ELF ABI version to 65 (`0x41`, the
+`AI\x02` magic) and Rosetta refuses a non-zero ABI version where the Linux
+kernel ignores it. `Exec format error` there is a host artifact, not a defect
+in the image. This last step needs a real x86-64 Linux machine or a CI runner.
