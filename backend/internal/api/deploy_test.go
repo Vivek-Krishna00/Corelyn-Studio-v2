@@ -87,8 +87,12 @@ func TestDeployWithNoRosbridgeReportsDeployedNoRobot(t *testing.T) {
 	}
 }
 
+// A live rosbridge link never delivers a terminal status event in this test,
+// so the run stays active and the second deploy must be rejected — unlike
+// the nil-Ros no-robot path, which closes the run itself (see
+// TestDeployWithNoRosbridgeAllowsRedeploy).
 func TestDeployRejectsWhenMissionAlreadyRunning(t *testing.T) {
-	srv := newTestServer(t)
+	srv := newTestServerWithRos(t)
 	body := string(validMissionBody(t))
 
 	rec1 := httptest.NewRecorder()
@@ -106,6 +110,48 @@ func TestDeployRejectsWhenMissionAlreadyRunning(t *testing.T) {
 	json.Unmarshal(rec2.Body.Bytes(), &got)
 	if _, ok := got["detail"]; !ok {
 		t.Errorf(`error body = %s, want a "detail" key`, rec2.Body.String())
+	}
+}
+
+// With no rosbridge configured, nothing will ever run the mission or send a
+// terminal status event — the daemon must close the run itself so the next
+// deploy is not blocked behind a phantom "already running" mission forever.
+func TestDeployWithNoRosbridgeAllowsRedeploy(t *testing.T) {
+	srv := newTestServer(t)
+	body := string(validMissionBody(t))
+
+	rec1 := httptest.NewRecorder()
+	srv.ServeHTTP(rec1, httptest.NewRequest("POST", "/api/deploy", strings.NewReader(body)))
+	if rec1.Code != 200 {
+		t.Fatalf("first deploy rejected: %d %s", rec1.Code, rec1.Body)
+	}
+
+	rec2 := httptest.NewRecorder()
+	srv.ServeHTTP(rec2, httptest.NewRequest("POST", "/api/deploy", strings.NewReader(body)))
+	if rec2.Code != 200 {
+		t.Fatalf("second no-robot deploy should not be blocked, got %d %s", rec2.Code, rec2.Body)
+	}
+	var got map[string]string
+	json.Unmarshal(rec2.Body.Bytes(), &got)
+	if got["status"] != "deployed_no_robot" {
+		t.Errorf(`second deploy status = %q, want "deployed_no_robot"`, got["status"])
+	}
+
+	rows, err := srv.deps.Store.DB().Query(`SELECT COALESCE(result, '<open>') FROM mission_runs ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var results []string
+	for rows.Next() {
+		var r string
+		if err := rows.Scan(&r); err != nil {
+			t.Fatal(err)
+		}
+		results = append(results, r)
+	}
+	if len(results) != 2 || results[0] == "<open>" || results[1] == "<open>" {
+		t.Errorf("mission_runs results = %v, want both runs terminal", results)
 	}
 }
 
@@ -138,7 +184,10 @@ func TestDeployValidationErrorNamesNodeAndField(t *testing.T) {
 // allowed without a session (see Server.actor), so what is asserted here is
 // that the row is always written, and carries the user whenever one is known.
 func TestDeployAndCancelAreAudited(t *testing.T) {
-	srv := newTestServer(t)
+	// A live Ros link, not nil: cancel only audits a mission it actually found
+	// active, and a nil-Ros deploy now closes its own run immediately (that's
+	// the deployed_no_robot fix), leaving nothing for cancel to act on.
+	srv := newTestServerWithRos(t)
 	spec, err := os.ReadFile("../../../shared/testdata/single_start.json")
 	if err != nil {
 		t.Fatal(err)

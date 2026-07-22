@@ -665,6 +665,7 @@ export default function RobotHMI() {
       const res = await api.deploy(spec);
       if (res?.status === "deployed_no_robot") {
         addLog("Deploy accepted but no robot is connected — mission will not run.", "warn");
+        toast("Deployed, but no robot is connected — the mission will not run.", "error");
         setMissionRunning(false);
       } else {
         addLog("✓ Mission deployed — robot executing", "success");

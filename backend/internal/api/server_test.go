@@ -1,12 +1,19 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"nhooyr.io/websocket"
 
 	"corelynstudio/backend/internal/nodes"
+	"corelynstudio/backend/internal/rosbridge"
 	"corelynstudio/backend/internal/store"
 )
 
@@ -27,6 +34,57 @@ func newTestServer(t *testing.T) *Server {
 	t.Cleanup(func() { st.Close() })
 
 	return New(Deps{Store: st, Defs: defs})
+}
+
+// newTestServerWithRos is newTestServer plus a live rosbridge connection, for
+// tests that need Publish to actually succeed rather than exercising the
+// nil-Ros no-robot path. The fake endpoint speaks just enough of the
+// protocol to accept the connection and drain frames — no test here cares
+// what the "robot" received.
+func newTestServerWithRos(t *testing.T) *Server {
+	t.Helper()
+
+	defs, err := nodes.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.CloseNow()
+		for {
+			if _, _, err := conn.Read(r.Context()); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(fake.Close)
+
+	ros := rosbridge.New("ws" + strings.TrimPrefix(fake.URL, "http"))
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_ = ros.Connect(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		wg.Wait()
+	})
+
+	srv := New(Deps{Store: st, Defs: defs, Ros: ros})
+	waitUntil(t, 5*time.Second, func() bool { return ros.State() == rosbridge.Connected },
+		"rosbridge client never reached Connected")
+	return srv
 }
 
 // Under `npm run electron:dev` the renderer is served from the Vite port while

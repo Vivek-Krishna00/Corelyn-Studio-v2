@@ -111,28 +111,34 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	s.active = &activeRun{missionID: spec.MissionID, programVersionID: versionID, missionRunID: runID}
 	s.mu.Unlock()
 
-	if s.deps.Ros != nil {
-		// std_msgs/String has exactly one field, so the spec travels as a
-		// string in msg.data rather than nested JSON (spec §4.5).
-		if err := s.deps.Ros.Publish(topicDeploy, msgTypeStr, map[string]string{"data": string(body)}); err != nil {
-			s.mu.Lock()
-			s.active = nil
-			s.mu.Unlock()
-			s.deps.Store.EndMissionRun(runID, "error")
-			writeError(w, http.StatusServiceUnavailable, "robot link unavailable: "+err.Error())
-			return
-		}
+	// No rosbridge configured means nothing will ever run this mission — say
+	// so, rather than reporting the same "deployed" a real robot link gets.
+	// Nothing will ever publish a terminal status event either, so this run
+	// must be closed out right here or it stays "active" forever, 409-ing
+	// every deploy after it.
+	if s.deps.Ros == nil {
+		s.mu.Lock()
+		s.active = nil
+		s.mu.Unlock()
+		s.deps.Store.EndMissionRun(runID, "no_robot")
+		s.deps.Store.InsertAuditLog(s.actor(r), "deploy", spec.MissionID)
+		writeJSON(w, http.StatusOK, map[string]string{"mission_id": spec.MissionID, "status": "deployed_no_robot"})
+		return
+	}
+
+	// std_msgs/String has exactly one field, so the spec travels as a
+	// string in msg.data rather than nested JSON (spec §4.5).
+	if err := s.deps.Ros.Publish(topicDeploy, msgTypeStr, map[string]string{"data": string(body)}); err != nil {
+		s.mu.Lock()
+		s.active = nil
+		s.mu.Unlock()
+		s.deps.Store.EndMissionRun(runID, "error")
+		writeError(w, http.StatusServiceUnavailable, "robot link unavailable: "+err.Error())
+		return
 	}
 
 	s.deps.Store.InsertAuditLog(s.actor(r), "deploy", spec.MissionID)
-
-	// No rosbridge configured means nothing will ever run this mission — say
-	// so, rather than reporting the same "deployed" a real robot link gets.
-	status := "deployed"
-	if s.deps.Ros == nil {
-		status = "deployed_no_robot"
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"mission_id": spec.MissionID, "status": status})
+	writeJSON(w, http.StatusOK, map[string]string{"mission_id": spec.MissionID, "status": "deployed"})
 }
 
 // cancelActive ends whatever mission is running. Cancelling with nothing

@@ -108,13 +108,24 @@ test.describe("connected graph execution + no-robot deploy honesty", () => {
     )).toBeVisible();
     await expect(page.getByText("Mission deployed successfully")).toHaveCount(0);
 
+    // Redeploy in the same modal: the daemon closes the no-robot run's mission
+    // run immediately instead of leaving a phantom "active" mission behind
+    // (backend/internal/api/deploy.go), so this must succeed with the same
+    // honest warning again — not a 409 "already running" error.
+    await deployBtn.click();
+    await expect(page.getByText(
+      "Deployed, but no robot is connected — the mission will not run.",
+    )).toBeVisible();
+    await expect(page.getByText(/already running/)).toHaveCount(0);
+
     await page.getByRole("button", { name: "✕" }).click();
     await expect(page.getByText("Deploy Mission")).toHaveCount(0);
 
     await openRightPanel(page, "LOG");
+    // Two matching lines now: one per deploy attempt above.
     await expect(page.getByText(
       "Deploy accepted but no robot is connected — mission will not run.",
-    )).toBeVisible();
+    ).first()).toBeVisible();
 
     // No robot ever ran it — the node never left idle.
     await expect(start).toHaveAttribute("data-status", "idle");
