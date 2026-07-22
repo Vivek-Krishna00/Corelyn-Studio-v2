@@ -76,3 +76,39 @@ func TestStatusWSSlowClientDroppedNotBlocked(t *testing.T) {
 		t.Fatal("Broadcast blocked on a slow client")
 	}
 }
+
+// The packaged renderer loads over file://, so its handshake carries an Origin
+// the default same-host check refuses. Before statusWSOrigins existed, every
+// status frame in the Electron app was dropped at the handshake with a 403.
+func TestStatusWSOriginPolicy(t *testing.T) {
+	srv := newTestServer(t)
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	wsURL := "ws" + ts.URL[len("http"):] + "/ws/mission/status"
+
+	for _, tc := range []struct {
+		origin string
+		accept bool
+	}{
+		{"file://", true},               // packaged renderer
+		{"http://localhost:5173", true}, // npm run dev
+		{"http://127.0.0.1:5173", true}, // ditto, other spelling
+		{"https://evil.example", false}, // a page in the operator's browser
+	} {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+			HTTPHeader: map[string][]string{"Origin": {tc.origin}},
+		})
+		if err == nil {
+			conn.CloseNow()
+		}
+		if tc.accept && err != nil {
+			t.Errorf("origin %q: want accepted, got %v", tc.origin, err)
+		}
+		if !tc.accept && err == nil {
+			t.Errorf("origin %q: want refused, got accepted", tc.origin)
+		}
+		cancel()
+	}
+}

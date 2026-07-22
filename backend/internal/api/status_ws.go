@@ -67,8 +67,16 @@ func (h *hub) broadcast(nodeID, status string) {
 	}
 }
 
+// statusWSOrigins are the Origins allowed to open the status stream, matched
+// against the Origin header's host. The packaged renderer loads over file://,
+// whose host is the empty string — the empty pattern is what admits it. The
+// loopback entries admit `npm run dev`, which serves the UI from the Vite port
+// while the daemon answers on its own. Everything else is still refused, so a
+// page in the operator's browser cannot quietly tail mission status.
+var statusWSOrigins = []string{"", "localhost:*", "127.0.0.1:*"}
+
 func (s *Server) handleStatusWS(w http.ResponseWriter, r *http.Request) {
-	conn, err := websocket.Accept(w, r, nil)
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: statusWSOrigins})
 	if err != nil {
 		return
 	}
