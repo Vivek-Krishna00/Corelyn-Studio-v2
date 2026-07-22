@@ -33,3 +33,7 @@ Deploy modal and Settings panel: `max-width: min(current, calc(100vw - 32px))`, 
 
 ## Out of scope
 Phone-size (<700px) support; touch gestures; canvas content reflow; changes to node card sizing.
+
+## Accepted deviations
+- **Palette clamp upper bound**: shipped as `clamp(240px, 22vw, 292px)`, not the `320px` this spec originally called for. 292px is the palette's actual pre-existing fixed width, and pinning the clamp's ceiling to it keeps the 1440×872 visual baselines byte-identical instead of widening the docked palette (and forcing a baseline regeneration) for no functional gain.
+- **Deploy modal `maxHeight`**: kept at `85vh` rather than switching to `calc(100vh - 32px)`. `85vh` already fits fully within 700×550 with its existing internal scroll, and — unlike `calc(100vh - 32px)` — it provably preserves rendering at large window sizes, since it's the value already in production there.

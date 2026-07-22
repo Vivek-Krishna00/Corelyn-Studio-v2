@@ -155,6 +155,7 @@ export default function RobotHMI() {
         setMobileSidebarOpen(false);
         setMobileRightOpen(false);
       }
+      setOverflowMenuOpen(false);
     };
     closeDrawers();
   }, [isNarrow]);
@@ -993,10 +994,12 @@ export default function RobotHMI() {
     >
 
       {/* ── TOPBAR ── */}
-      {/* zIndex above .drawer-backdrop's 200 (see App.css) so the topbar —
-          including the palette drawer's own open/close toggle — stays
-          reachable while a drawer's dim backdrop is up; still below the
-          drawers themselves (300). */}
+      {/* zIndex above .drawer-backdrop's 200 (see App.css) so the topbar
+          stays clickable over a drawer's dim backdrop — e.g. the palette
+          ☰ toggle is still reachable while the right drawer (and its
+          backdrop) is open. Still below the drawers themselves (300), so
+          a drawer covers the topbar wherever it sits — including, while
+          it's open, its own toggle button. */}
       <div className="topbar-row" style={{ display: "flex", alignItems: "center", height: 52, padding: "0 16px", background: "var(--topbar-bg)", borderBottom: "1px solid var(--border)", flexShrink: 0, zIndex: 250, gap: 10, boxShadow: "var(--shadow-subtle)" }}>
         {/* Logo */}
         <div className="topbar-logo" style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0, minWidth: 230 }}>
@@ -1162,7 +1165,7 @@ export default function RobotHMI() {
 
         {/* ── LEFT SIDEBAR (N8N node panel) ── */}
         {isNarrow ? (
-          <div className={`left-sidebar ${mobileSidebarOpen ? "" : "left-sidebar-closed"}`}>
+          <div className={`left-sidebar ${mobileSidebarOpen ? "" : "left-sidebar-closed"}`} inert={!mobileSidebarOpen}>
             <NodePalette
               expandedCategories={expandedCategories}
               onToggleCategory={toggleCategory}
@@ -1410,7 +1413,7 @@ export default function RobotHMI() {
 
         {/* ── RIGHT PANEL ── */}
         {isNarrow ? (
-          <div className={`right-panel ${mobileRightOpen ? "" : "right-panel-closed"}`} style={{ width: mobileRightOpen ? 300 : 0 }}>
+          <div className={`right-panel ${mobileRightOpen ? "" : "right-panel-closed"}`} style={{ width: mobileRightOpen ? 300 : 0 }} inert={!mobileRightOpen}>
             {/* Mobile close header */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
               <span style={{ fontSize: 14, color: "var(--text-muted)", letterSpacing: "0.08em", fontWeight: 700 }}>

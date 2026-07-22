@@ -93,6 +93,15 @@ test.describe("responsive shell", () => {
     const rightWidth = await page.locator(".right-panel").evaluate((el) => el.getBoundingClientRect().width);
     expect(rightX + rightWidth).toBeLessThanOrEqual(viewport.width + 1);
     expect(rightX).toBeLessThan(viewport.width);
+
+    // Topbar row's z-index (250) sits above the drawer backdrop (200), so
+    // the palette toggle stays clickable through it even with the right
+    // drawer (and its backdrop) up — clicking it opens the palette and
+    // closes the right drawer.
+    await page.getByTitle("Open blocks panel").click();
+    await expect(page.getByTitle("Close blocks panel")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Expand node panel" })).toBeVisible();
+
     await page.locator(".drawer-backdrop").click();
     await expect(page.getByRole("button", { name: "Expand node panel" })).toBeVisible();
 
