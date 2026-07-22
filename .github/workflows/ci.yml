@@ -1,0 +1,147 @@
+name: CI
+
+# Runs on ubuntu-22.04 deliberately: that is the deployment target, and 24.04
+# renamed several of the libraries below to their `t64` variants. If GitHub
+# retires this runner image, switch the label and the apt list together.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: go test
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - run: go test ./...
+        working-directory: backend
+
+  lint:
+    # Advisory, not a gate. eslint exits non-zero today on 49 pre-existing
+    # problems — mostly React Compiler memoization diagnostics in App.jsx that
+    # surfaced when the file shrank enough for the compiler to attempt it.
+    # A job red on every run is a job people stop reading, so this reports the
+    # count without blocking. Make it a gate once the count reaches zero.
+    name: eslint (advisory)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+
+  e2e:
+    name: playwright (electron)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      # Electron does not bundle GTK. xvfb gives it a display; sqlite3 is what
+      # auth.spec.js reads the audit log with.
+      - name: Install Electron's runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb sqlite3 \
+            libgtk-3-0 libnss3 libasound2 libgbm1 libatk-bridge2.0-0 \
+            libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
+            libxfixes3 libxrandr2 libpango-1.0-0 libxss1 libnotify4
+
+      - run: npm ci
+      - run: make -C backend dev
+      - run: npm run build
+
+      # Not `npm run test:e2e`: that rebuilds what the two steps above already
+      # built, and the suite needs a display wrapped around it.
+      - name: Run the suite
+        run: xvfb-run -a npx playwright test
+
+      # The visual baselines are per-platform and only the darwin set is
+      # committed, so the first run here writes a -linux set and fails by
+      # design. Download this artifact and commit those files — do not delete
+      # the darwin ones.
+      - name: Upload snapshots and diffs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-snapshots
+          path: |
+            tests/e2e/visual.spec.js-snapshots/
+            test-results/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  appimage:
+    name: appimage
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      # libfuse2 is what lets a type-2 AppImage mount itself. Ubuntu 22.04
+      # does not ship it, which is the usual first stumble on a real machine.
+      - name: Install AppImage and Electron runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb libfuse2 \
+            libgtk-3-0 libnss3 libasound2 libgbm1 libatk-bridge2.0-0 \
+            libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
+            libxfixes3 libxrandr2 libpango-1.0-0 libxss1 libnotify4
+
+      - run: npm ci
+      - name: Cross-compile the sidecar and package
+        run: |
+          make -C backend linux
+          npm run electron:build:linux
+
+      # Checks architecture, that nothing is missing, that the sidecar is
+      # genuinely static, that the database lands under $HOME/.config, and
+      # that the daemon exits with the app instead of being orphaned.
+      - name: Verify the bundle
+        run: xvfb-run -a ./scripts/verify-appimage.sh
+
+      - name: Upload the AppImage
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: corelyn-studio-appimage
+          path: release/*.AppImage
+          retention-days: 14

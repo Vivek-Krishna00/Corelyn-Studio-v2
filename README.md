@@ -115,6 +115,19 @@ Seven of the sixteen are pixel baselines guarding the module split — see
 taken on macOS; a first run on Linux or Windows writes its own and fails by
 design. Commit those rather than deleting the darwin set.
 
+CI (`.github/workflows/ci.yml`) runs the Go tests, the Playwright suite under
+`xvfb`, and a native AppImage build plus `scripts/verify-appimage.sh`, all on
+`ubuntu-22.04`. Two things to expect from it:
+
+- **The first `e2e` run fails.** No Linux snapshots exist yet. Download the
+  `playwright-snapshots` artifact and commit the `-linux.png` files.
+- **`eslint` is advisory and currently red.** It reports the count without
+  blocking; making it a gate is a decision for whenever the backlog is cleared.
+
+Baselines generated under `xvfb` are software-rendered. They will not match a
+run from a real desktop session on the same machine — the tolerances exist
+because of GPU blur and antialiasing, which `xvfb` does not do.
+
 The baselines tolerate 25 differing pixels at a colour distance of 0.02. Neither
 number is taste: GPU backdrop-filter blur lands ±1 per channel between runs, and
 a one-pixel change to a node's border radius dirties 181 pixels. The budget sits
