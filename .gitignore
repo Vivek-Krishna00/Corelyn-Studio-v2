@@ -23,6 +23,10 @@ backend/corelyn-mockbot
 backend/dist
 *.db
 
+# Playwright
+test-results/
+playwright-report/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

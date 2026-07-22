@@ -6,7 +6,14 @@ export GOARCH=amd64
 
 DIST=dist
 
-.PHONY: linux clean
+.PHONY: dev linux clean
+
+# Host-native binaries, where electron/sidecar.cjs and the Playwright E2E
+# look for them. GOOS/GOARCH are cleared so this builds for the machine you
+# are on rather than the AppImage target above.
+dev:
+	GOOS= GOARCH= go build -o corelyn-studiod ./cmd/corelyn-studiod
+	GOOS= GOARCH= go build -o corelyn-mockbot ./cmd/corelyn-mockbot
 
 linux:
 	mkdir -p $(DIST)

@@ -90,7 +90,15 @@ async function startSidecar() {
   // but the OS closes that pipe anyway — the daemon's own stdin-EOF watch
   // (backend/cmd/corelyn-studiod/main.go) is what actually kills it in that
   // case, not anything below.
-  const child = spawn(bin, ['--port', String(port), '--db', dbPath], {
+  // The robot link is optional: with no URL the daemon serves the API but has
+  // nowhere to publish missions. DEMO MODE (spec §3.3) is this pointed at
+  // corelyn-mockbot; a live cell points it at the robot's rosbridge.
+  const args = ['--port', String(port), '--db', dbPath];
+  if (process.env.CORELYN_ROSBRIDGE_URL) {
+    args.push('--rosbridge', process.env.CORELYN_ROSBRIDGE_URL);
+  }
+
+  const child = spawn(bin, args, {
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 
