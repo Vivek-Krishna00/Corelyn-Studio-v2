@@ -1111,7 +1111,7 @@ export default function RobotHMI() {
                 <TopBtn onClick={() => { handleClearCanvas(); setOverflowMenuOpen(false); }} title="Clear canvas">⊠ Clear</TopBtn>
                 <TopBtn onClick={() => { handleExportMission(); setOverflowMenuOpen(false); }} disabled={flow.nodes.length === 0} accent="#0891b2" title="Export mission as JSON">⬇ Export</TopBtn>
                 <TopBtn onClick={() => { handleImportClick(); setOverflowMenuOpen(false); }} accent="#8BA2AC" title="Import nodes from JSON">📥 Import</TopBtn>
-                <button className="topbar-overflow-chain" onClick={handleToggleChain} title="Chain mode — auto-advance source after connection">
+                <button className="topbar-overflow-chain" onClick={() => { handleToggleChain(); setOverflowMenuOpen(false); }} title="Chain mode — auto-advance source after connection" style={{ padding: "2px 6px", borderRadius: 4, border: chainMode ? "1px solid #3b82f6" : "1px solid var(--border)", background: chainMode ? "rgba(59,130,246,0.08)" : "transparent", color: chainMode ? "#3b82f6" : "var(--text-muted)", cursor: "pointer", fontSize: 14, fontFamily: "'Inter', sans-serif", fontWeight: 700, letterSpacing: "0.04em", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)", whiteSpace: "nowrap" }}>
                   {chainMode ? "CHAIN ⛓" : "CHAIN"}
                 </button>
                 <div className="topbar-overflow-divider" />
