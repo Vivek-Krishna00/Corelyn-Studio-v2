@@ -68,6 +68,25 @@ func TestDeployValidMissionSucceedsAndPersists(t *testing.T) {
 	}
 }
 
+// newTestServer never wires a rosbridge client. The daemon must not claim a
+// mission was deployed when nothing will ever run it (spec §8.1 honesty).
+func TestDeployWithNoRosbridgeReportsDeployedNoRobot(t *testing.T) {
+	srv := newTestServer(t)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/deploy", strings.NewReader(string(validMissionBody(t))))
+	req.Header.Set("Content-Type", "application/json")
+	srv.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("deploy rejected: %d %s", rec.Code, rec.Body)
+	}
+
+	var got map[string]string
+	json.Unmarshal(rec.Body.Bytes(), &got)
+	if got["status"] != "deployed_no_robot" {
+		t.Errorf(`status = %q, want "deployed_no_robot"`, got["status"])
+	}
+}
+
 func TestDeployRejectsWhenMissionAlreadyRunning(t *testing.T) {
 	srv := newTestServer(t)
 	body := string(validMissionBody(t))

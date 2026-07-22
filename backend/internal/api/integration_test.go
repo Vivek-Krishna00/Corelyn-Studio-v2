@@ -202,6 +202,21 @@ func (d *daemon) deploy(t *testing.T, body []byte) (int, map[string]any) {
 	return resp.StatusCode, out
 }
 
+// health hits GET /api/health on the running daemon.
+func (d *daemon) health(t *testing.T) map[string]string {
+	t.Helper()
+	resp, err := http.Get(d.http.URL + "/api/health")
+	if err != nil {
+		t.Fatalf("GET /api/health: %v", err)
+	}
+	defer resp.Body.Close()
+	var got map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
 // nodeEvents returns every persisted node event in insertion order.
 func (d *daemon) nodeEvents(t *testing.T) []statusMsg {
 	t.Helper()
@@ -403,6 +418,47 @@ func TestIntegrationHappyPath(t *testing.T) {
 	// Recovery path: the run is over, so the next deploy is accepted.
 	if code, body := d.deploy(t, spec); code != http.StatusOK {
 		t.Fatalf("redeploy after completion = %d %v", code, body)
+	}
+}
+
+// A deploy with a live rosbridge link must say so honestly — "deployed", not
+// the no-robot variant a nil Ros would report.
+func TestIntegrationDeployWithRobotReportsDeployed(t *testing.T) {
+	mb := startMockbot(t, 20)
+	d := startDaemon(t, mb.wsURL)
+
+	code, body := d.deploy(t, loadFixture(t, "linear_chain.json"))
+	if code != http.StatusOK {
+		t.Fatalf("deploy = %d %v", code, body)
+	}
+	if body["status"] != "deployed" {
+		t.Fatalf("status = %v, want %q", body["status"], "deployed")
+	}
+}
+
+// Health must reflect the rosbridge link the server actually has, not just
+// whether one was configured.
+func TestIntegrationHealthReportsRobotConnected(t *testing.T) {
+	mb := startMockbot(t, 20)
+	d := startDaemon(t, mb.wsURL)
+
+	got := d.health(t)
+	if got["robot"] != "connected" {
+		t.Fatalf("health robot = %q, want %q", got["robot"], "connected")
+	}
+}
+
+func TestIntegrationHealthReportsRobotDisconnectedAfterLinkDrop(t *testing.T) {
+	mb := startMockbot(t, 1)
+	d := startDaemon(t, mb.wsURL)
+
+	mb.fault(t, `{"fault":"disconnect"}`)
+	waitUntil(t, time.Second, func() bool { return d.ros.State() != rosbridge.Connected },
+		"rosbridge client did not report a dropped connection within 1s")
+
+	got := d.health(t)
+	if got["robot"] != "disconnected" {
+		t.Fatalf("health robot = %q, want %q", got["robot"], "disconnected")
 	}
 }
 

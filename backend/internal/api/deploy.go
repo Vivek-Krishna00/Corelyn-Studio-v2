@@ -126,7 +126,13 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request) {
 
 	s.deps.Store.InsertAuditLog(s.actor(r), "deploy", spec.MissionID)
 
-	writeJSON(w, http.StatusOK, map[string]string{"mission_id": spec.MissionID, "status": "deployed"})
+	// No rosbridge configured means nothing will ever run this mission — say
+	// so, rather than reporting the same "deployed" a real robot link gets.
+	status := "deployed"
+	if s.deps.Ros == nil {
+		status = "deployed_no_robot"
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"mission_id": spec.MissionID, "status": status})
 }
 
 // cancelActive ends whatever mission is running. Cancelling with nothing

@@ -217,6 +217,22 @@ func (s *Server) onRosState(st rosbridge.ConnState) {
 	}
 }
 
+// robotState reports the rosbridge link state for GET /api/health: "none"
+// when the daemon was started with no rosbridge URL, otherwise "connected" or
+// "disconnected" per the latest onRosState callback.
+func (s *Server) robotState() string {
+	if s.deps.Ros == nil {
+		return "none"
+	}
+	s.mu.Lock()
+	up := s.rosUp
+	s.mu.Unlock()
+	if up {
+		return "connected"
+	}
+	return "disconnected"
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
