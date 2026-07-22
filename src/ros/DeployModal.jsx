@@ -14,7 +14,7 @@ const modalCard = {
   overflow: "hidden",
 };
 
-export default function DeployModal({ mission, rosConnected, onClose, onDeploy }) {
+export default function DeployModal({ mission, apiOnline, robotConnected, onClose, onDeploy, onLog }) {
   const [tab, setTab] = useState("preview");
   const [copied, setCopied] = useState(false);
   const [deploying, setDeploying] = useState(false);
@@ -42,8 +42,14 @@ export default function DeployModal({ mission, rosConnected, onClose, onDeploy }
     setDeploying(true);
     setDeployResult(null);
     try {
-      await onDeploy(mission);
-      setDeployResult({ ok: true, msg: "Mission deployed successfully" });
+      const res = await onDeploy(mission);
+      if (res?.status === "deployed_no_robot") {
+        const msg = "Deployed, but no robot is connected — the mission will not run.";
+        setDeployResult({ warn: true, msg });
+        onLog?.("Deploy accepted but no robot is connected — mission will not run.", "warn");
+      } else {
+        setDeployResult({ ok: true, msg: "Mission deployed successfully" });
+      }
     } catch (err) {
       setDeployResult({ ok: false, msg: err.message || "Deploy failed" });
     } finally {
@@ -110,8 +116,8 @@ export default function DeployModal({ mission, rosConnected, onClose, onDeploy }
 
           {/* Deploy result */}
           {deployResult && (
-            <div style={{ marginTop: 12, padding: "10px 14px", borderRadius: 8, fontSize: 11, fontWeight: 600, background: deployResult.ok ? "rgba(16,185,129,0.08)" : "rgba(220,38,38,0.08)", border: `1px solid ${deployResult.ok ? "rgba(16,185,129,0.2)" : "rgba(220,38,38,0.2)"}`, color: deployResult.ok ? "#10b981" : "#dc2626" }}>
-              {deployResult.ok ? "✓ " : "✗ "}{deployResult.msg}
+            <div style={{ marginTop: 12, padding: "10px 14px", borderRadius: 8, fontSize: 11, fontWeight: 600, background: deployResult.warn ? "rgba(217,119,6,0.08)" : deployResult.ok ? "rgba(16,185,129,0.08)" : "rgba(220,38,38,0.08)", border: `1px solid ${deployResult.warn ? "rgba(217,119,6,0.2)" : deployResult.ok ? "rgba(16,185,129,0.2)" : "rgba(220,38,38,0.2)"}`, color: deployResult.warn ? "#d97706" : deployResult.ok ? "#10b981" : "#dc2626" }}>
+              {deployResult.warn ? "⚠ " : deployResult.ok ? "✓ " : "✗ "}{deployResult.msg}
             </div>
           )}
         </div>
@@ -133,11 +139,11 @@ export default function DeployModal({ mission, rosConnected, onClose, onDeploy }
             </button>
           </div>
           <button onClick={handleDeploy}
-            disabled={!rosConnected || deploying}
-            style={{ padding: "8px 20px", background: rosConnected && !deploying ? "#2563eb" : "#3a3a3a", border: "none", borderRadius: 8, color: "#1e1e1e", cursor: rosConnected && !deploying ? "pointer" : "not-allowed", fontSize: 12, fontFamily: "'Inter', sans-serif", fontWeight: 700, transition: "all 0.15s" }}
-            onMouseEnter={e => { if (rosConnected && !deploying) e.currentTarget.style.background = "#1d4ed8"; }}
-            onMouseLeave={e => { if (rosConnected && !deploying) e.currentTarget.style.background = "#2563eb"; }}>
-            {deploying ? "Deploying..." : rosConnected ? "Deploy via ROS" : "ROS Disconnected"}
+            disabled={!apiOnline || deploying}
+            style={{ padding: "8px 20px", background: apiOnline && !deploying ? "#2563eb" : "#3a3a3a", border: "none", borderRadius: 8, color: "#1e1e1e", cursor: apiOnline && !deploying ? "pointer" : "not-allowed", fontSize: 12, fontFamily: "'Inter', sans-serif", fontWeight: 700, transition: "all 0.15s" }}
+            onMouseEnter={e => { if (apiOnline && !deploying) e.currentTarget.style.background = "#1d4ed8"; }}
+            onMouseLeave={e => { if (apiOnline && !deploying) e.currentTarget.style.background = "#2563eb"; }}>
+            {deploying ? "Deploying..." : robotConnected ? "Deploy via ROS" : "Deploy (no robot)"}
           </button>
         </div>
       </div>

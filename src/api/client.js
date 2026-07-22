@@ -36,10 +36,11 @@ async function post(path, body) {
   return res.json();
 }
 
+// Returns the full {status, robot} body — "robot" is "none" | "connected" |
+// "disconnected" (daemon-up is not the same thing as robot-link-up).
 export async function health() {
   const res = await fetch(`${BASE_URL}/api/health`, { signal: AbortSignal.timeout(3000) });
-  const data = await res.json();
-  return data.status === "ok";
+  return res.json();
 }
 
 export const deploy = (spec) => post("/api/deploy", spec);

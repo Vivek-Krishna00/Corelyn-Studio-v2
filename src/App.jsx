@@ -844,7 +844,7 @@ export default function RobotHMI() {
     let mounted = true;
     const poll = () => {
       api.health()
-        .then(ok => { if (mounted) setBackendOnline(ok); })
+        .then(data => { if (mounted) setBackendOnline(data.status === "ok"); })
         .catch(() => { if (mounted) setBackendOnline(false); });
     };
     poll();
@@ -1358,6 +1358,7 @@ export default function RobotHMI() {
         <DeployModalWrapper
           flow={flow}
           onClose={() => setDeployModalOpen(false)}
+          onLog={addLog}
         />
       )}
 
