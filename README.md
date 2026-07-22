@@ -102,7 +102,7 @@ when Electron is killed hard — so run it in a shell that keeps stdin open.
 
 ```bash
 cd backend && go test ./...   # daemon, store, auth, rosbridge, mission sort, mockbot integration
-npm run test:e2e              # 19 Playwright tests against real Electron + daemon + mockbot
+npm run test:e2e              # 23 Playwright tests against real Electron + daemon + mockbot
 npm run lint
 ```
 
@@ -110,7 +110,7 @@ npm run lint
 directly, so a backend change without a rebuild silently tests the previous
 daemon.
 
-Seven of the nineteen are pixel baselines guarding the module split — see
+Seven of the twenty-three are pixel baselines guarding the module split — see
 `tests/e2e/visual.spec.js`. Snapshots are per-platform and the committed set was
 taken on macOS; a first run on Linux or Windows writes its own and fails by
 design. Commit those rather than deleting the darwin set.

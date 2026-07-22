@@ -39,6 +39,19 @@ function waitForPort(port, deadlineAt) {
   });
 }
 
+// Sets the Electron window's content size and waits for the renderer to
+// observe it — the OS applies a resize asynchronously, and reading the DOM
+// (or reloading, for the deterministic path) before it lands measures against
+// the old viewport.
+async function setWindowSize(app, page, { width, height }) {
+  await app.evaluate(({ BrowserWindow }, size) =>
+    BrowserWindow.getAllWindows()[0].setContentSize(size.width, size.height), { width, height });
+  await page.waitForFunction(
+    (size) => innerWidth === size.width && innerHeight === size.height,
+    { width, height },
+  );
+}
+
 // Starts corelyn-mockbot and resolves once it is accepting connections, so the
 // daemon's rosbridge client finds it on its first attempt rather than backing off.
 export async function startMockbot() {
@@ -55,7 +68,7 @@ export async function startMockbot() {
 // userData dir, so each test starts from an empty corelyn.db. Returns once the
 // editor is up and the sidecar is answering — "API ONLINE" gates every caller,
 // because the badge and the Run button both change label when it flips.
-export async function launchApp(rosbridgeUrl, { deterministic = false } = {}) {
+export async function launchApp(rosbridgeUrl, { deterministic = false, windowSize } = {}) {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "corelyn-e2e-"));
   const app = await electron.launch({
     args: [".", `--user-data-dir=${userDataDir}`],
@@ -64,15 +77,15 @@ export async function launchApp(rosbridgeUrl, { deterministic = false } = {}) {
     env: { ...process.env, TZ: "UTC", CORELYN_ROSBRIDGE_URL: rosbridgeUrl ?? "" },
   });
   const page = await app.firstWindow();
+  if (!deterministic && windowSize) {
+    // Responsive tests need a specific viewport but not a frozen clock/RNG —
+    // set the size the same way the deterministic path does, minus the freeze.
+    await setWindowSize(app, page, windowSize);
+  }
   if (deterministic) {
     // The OS does not always hand back the size main.cjs asked for, and a
     // baseline is worthless if the viewport moves under it.
-    await app.evaluate(({ BrowserWindow }) =>
-      BrowserWindow.getAllWindows()[0].setContentSize(1440, 872));
-    // The OS applies the resize asynchronously; reloading before it lands
-    // leaves the canvas measured against the old viewport, which moves every
-    // node the tests place.
-    await page.waitForFunction(() => innerWidth === 1440 && innerHeight === 872);
+    await setWindowSize(app, page, windowSize ?? { width: 1440, height: 872 });
 
     // Reloading while the first navigation is still in flight cancels it, and
     // the init script then never runs — silently, leaving a live clock and a
@@ -97,7 +110,15 @@ export async function launchApp(rosbridgeUrl, { deterministic = false } = {}) {
   await page.getByPlaceholder("Enter your password").fill(OPERATOR.password);
   await page.getByRole("button", { name: "Sign In" }).click();
   await expect(page.getByText(/system blocks/i)).toBeVisible();
-  await expect(page.getByText("API ONLINE")).toBeVisible();
+  // Gates on the daemon's own health endpoint rather than the "API ONLINE"
+  // badge text: below the compact/narrow breakpoints that text shortens to
+  // "ONLINE" or disappears into the overflow menu entirely, but the
+  // underlying readiness this is meant to confirm doesn't change with the
+  // window size.
+  await expect.poll(async () => {
+    const res = await fetch(`http://127.0.0.1:${apiPort}/api/health`);
+    return res.ok ? (await res.json()).status : null;
+  }).toBe("ok");
   return { app, page, userDataDir };
 }
 

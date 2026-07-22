@@ -462,7 +462,12 @@ body {
   position: absolute;
   top: 14px;
   right: 14px;
-  z-index: 55;
+  /* Above .drawer-backdrop's z-index: 200 (below in the same stacking
+     context, since neither ancestor establishes its own) — otherwise the
+     backdrop that opens with the palette drawer also intercepts this
+     button's clicks, so the right drawer becomes unreachable until the
+     palette one is closed first. Still below the drawers themselves (300). */
+  z-index: 250;
   width: 30px;
   height: 30px;
   display: inline-flex;
@@ -957,9 +962,12 @@ body {
     font-size: 12px !important;
   }
   .topbar-row {
-    padding-left: 8px;
-    padding-right: 8px;
-    gap: 4px;
+    /* !important because App.jsx sets padding/gap inline on this element
+       (base "0 16px" / 10px) — an unqualified override here is a silent
+       no-op, same reason the pill rules above already need it. */
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+    gap: 4px !important;
   }
   .settings-tab-button {
     padding: 6px 8px;

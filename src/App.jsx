@@ -993,7 +993,11 @@ export default function RobotHMI() {
     >
 
       {/* ── TOPBAR ── */}
-      <div className="topbar-row" style={{ display: "flex", alignItems: "center", height: 52, padding: "0 16px", background: "var(--topbar-bg)", borderBottom: "1px solid var(--border)", flexShrink: 0, zIndex: 100, gap: 10, boxShadow: "var(--shadow-subtle)" }}>
+      {/* zIndex above .drawer-backdrop's 200 (see App.css) so the topbar —
+          including the palette drawer's own open/close toggle — stays
+          reachable while a drawer's dim backdrop is up; still below the
+          drawers themselves (300). */}
+      <div className="topbar-row" style={{ display: "flex", alignItems: "center", height: 52, padding: "0 16px", background: "var(--topbar-bg)", borderBottom: "1px solid var(--border)", flexShrink: 0, zIndex: 250, gap: 10, boxShadow: "var(--shadow-subtle)" }}>
         {/* Logo */}
         <div className="topbar-logo" style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0, minWidth: 230 }}>
           <img src={corelynLogo} alt="Corelyn" style={{ height: 40, width: "auto", display: "block" }} />
@@ -1141,7 +1145,11 @@ export default function RobotHMI() {
           type="button"
         >
           <span aria-hidden="true">⚙</span>
-          <span>Settings</span>
+          {/* Every other topbar control drops its text at the compact tier
+              (see isCompact usage above) — Settings was missed, and stayed
+              full-width long enough to clip the row from 1000px up to
+              ~1108px, below the 1200px breakpoint that's supposed to cover it. */}
+          {!isCompact && <span>Settings</span>}
         </button>
       </div>
 
