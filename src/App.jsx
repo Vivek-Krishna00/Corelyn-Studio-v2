@@ -4,6 +4,13 @@ import "./App.css";
 import * as api from "./api/client";
 import DeployModal from "./ros/DeployModal";
 import { generateMissionSpec } from "./ros/missionSpec";
+import CanvasMiniMap from "./canvas/CanvasMiniMap";
+import NodeCard from "./canvas/NodeCard";
+import DeployModalWrapper from "./mission/DeployModalWrapper";
+import SettingsPanel from "./shell/SettingsPanel";
+import TopBtn from "./shell/TopBtn";
+import { CANVAS_TONES, DEFAULT_EDITOR_SETTINGS, GRID_DENSITIES, LIGHT_CANVAS_TONES, THEME_MODES, getSystemTheme, readEditorSettings } from "./shell/editorSettings";
+import { MARQUEE_THRESHOLD, MAX_ZOOM, MIN_ZOOM, NODE_H, NODE_PLACE_GAP, NODE_W, clamp, findOpenNodePosition, getEstimatedNodeHeight, getNodePlacementRect, getPortPos, getSteppedConnectionPath, getTouchMetrics, normalizeRect, rectsIntersect } from "./canvas/geometry";
 import NodeInspector from "./inspector/NodeInspector";
 import MissionControl from "./mission/MissionControl";
 import NodePalette from "./palette/NodePalette";
@@ -14,14 +21,6 @@ import SignupPage from "./SignupPage";
 
 // ─── TYPES & CONSTANTS ───────────────────────────────────────────────────────
 
-const NODE_W = 236;
-const NODE_H = 72;
-const NODE_PLACE_GAP = 28;
-const MIN_ZOOM = 0.2;
-const MAX_ZOOM = 2.0;
-const MARQUEE_THRESHOLD = 6;
-
-
 const DEFAULT_EXPANDED_CATEGORIES = {
   flow: false,
   motion: true,
@@ -31,176 +30,7 @@ const DEFAULT_EXPANDED_CATEGORIES = {
   sensing: false,
 };
 
-const DEFAULT_EDITOR_SETTINGS = {
-  themeMode: "dark",
-  canvasTone: "midnight",
-  gridDensity: "standard",
-  showGrid: true,
-  showMinimap: true,
-  compactPalette: false,
-  animations: true,
-  nodeGlow: true,
-};
-
-const THEME_MODES = {
-  dark: { label: "Dark", icon: "◐" },
-  light: { label: "Light", icon: "☀" },
-  system: { label: "System", icon: "◒" },
-};
-
-const CANVAS_TONES = {
-  midnight: { label: "Midnight", background: "#111418", dot: "rgba(161,174,187,0.28)", line: "rgba(255,255,255,0.025)" },
-  graphite: { label: "Graphite", background: "#17191c", dot: "rgba(164,176,184,0.22)", line: "rgba(255,255,255,0.035)" },
-  deep: { label: "Deep Blue", background: "#0d1320", dot: "rgba(96,165,250,0.24)", line: "rgba(96,165,250,0.035)" },
-};
-
-const LIGHT_CANVAS_TONES = {
-  midnight: { label: "Frost", background: "#eef3f6", dot: "rgba(69,88,98,0.32)", line: "rgba(41,56,64,0.06)" },
-  graphite: { label: "Mist", background: "#f6f7f8", dot: "rgba(76,91,101,0.24)", line: "rgba(38,48,56,0.055)" },
-  deep: { label: "Sky", background: "#edf6fb", dot: "rgba(37,99,155,0.26)", line: "rgba(37,99,155,0.055)" },
-};
-
-const GRID_DENSITIES = {
-  fine: { label: "Fine", dot: 36, line: 18 },
-  standard: { label: "Standard", dot: 48, line: 24 },
-  wide: { label: "Wide", dot: 64, line: 32 },
-};
-
-function getSystemTheme() {
-  if (typeof window === "undefined" || !window.matchMedia) return "dark";
-  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
-}
-
-function readEditorSettings() {
-  if (typeof window === "undefined") return DEFAULT_EDITOR_SETTINGS;
-  try {
-    const saved = window.localStorage.getItem("corelyn_editor_settings");
-    return saved ? { ...DEFAULT_EDITOR_SETTINGS, ...JSON.parse(saved) } : DEFAULT_EDITOR_SETTINGS;
-  } catch {
-    return DEFAULT_EDITOR_SETTINGS;
-  }
-}
-
 function uid() { return Math.random().toString(36).slice(2, 9); }
-function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
-
-function normalizeRect(start, current) {
-  const x = Math.min(start.x, current.x);
-  const y = Math.min(start.y, current.y);
-  return {
-    x,
-    y,
-    width: Math.abs(current.x - start.x),
-    height: Math.abs(current.y - start.y),
-  };
-}
-
-function rectsIntersect(a, b) {
-  return a.x < b.x + b.width &&
-    a.x + a.width > b.x &&
-    a.y < b.y + b.height &&
-    a.y + a.height > b.y;
-}
-
-function getTouchMetrics(touches) {
-  const [first, second] = touches;
-  const center = {
-    x: (first.clientX + second.clientX) / 2,
-    y: (first.clientY + second.clientY) / 2,
-  };
-  const dx = second.clientX - first.clientX;
-  const dy = second.clientY - first.clientY;
-  return { center, distance: Math.max(1, Math.hypot(dx, dy)) };
-}
-
-function portY(idx, total, h) {
-  const spacing = h / (total + 1);
-  return spacing * (idx + 1);
-}
-
-function getPortPos(node, portId, side) {
-  const def = getNodeDef(node.type);
-  if (!def) return { x: node.x, y: node.y };
-  const ports = def.ports.filter(p => p.side === side);
-  const idx = ports.findIndex(p => p.id === portId);
-  return {
-    x: side === "in" ? node.x : node.x + NODE_W,
-    y: node.y + portY(idx, ports.length, NODE_H),
-  };
-}
-
-function getEstimatedNodeHeight(typeOrNode) {
-  const type = typeof typeOrNode === "string" ? typeOrNode : typeOrNode?.type;
-  const def = getNodeDef(type);
-  const paramCount = def?.params ? Object.keys(def.params).length : 0;
-  return Math.max(NODE_H, 74 + Math.max(paramCount, 1) * 28);
-}
-
-function getNodePlacementRect(node, gap = 0) {
-  return {
-    x: node.x - gap,
-    y: node.y - gap,
-    width: NODE_W + gap * 2,
-    height: getEstimatedNodeHeight(node) + gap * 2,
-  };
-}
-
-function findOpenNodePosition(type, preferred, nodes) {
-  const candidate = { type, x: preferred.x, y: preferred.y };
-  const overlaps = (next) => nodes.some(node =>
-    rectsIntersect(getNodePlacementRect(next, NODE_PLACE_GAP), getNodePlacementRect(node, NODE_PLACE_GAP)),
-  );
-
-  if (!overlaps(candidate)) return { x: candidate.x, y: candidate.y };
-
-  const stepX = NODE_W + NODE_PLACE_GAP * 2;
-  const stepY = getEstimatedNodeHeight(type) + NODE_PLACE_GAP * 2;
-  for (let ring = 1; ring <= 8; ring++) {
-    for (let row = -ring; row <= ring; row++) {
-      for (let col = -ring; col <= ring; col++) {
-        if (Math.max(Math.abs(row), Math.abs(col)) !== ring) continue;
-        const next = {
-          type,
-          x: preferred.x + col * stepX,
-          y: preferred.y + row * stepY,
-        };
-        if (!overlaps(next)) return { x: next.x, y: next.y };
-      }
-    }
-  }
-
-  return {
-    x: preferred.x + (nodes.length % 5) * stepX,
-    y: preferred.y + Math.floor(nodes.length / 5) * stepY,
-  };
-}
-
-function getSteppedConnectionPath(from, to) {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  if (Math.abs(dy) < 2) return `M${from.x} ${from.y} H${to.x}`;
-
-  const dirX = dx >= 0 ? 1 : -1;
-  const dirY = dy >= 0 ? 1 : -1;
-  const elbowX = from.x + dx * 0.58;
-  const radius = Math.min(18, Math.abs(dx) / 4, Math.abs(dy) / 2);
-
-  if (radius < 2) {
-    return `M${from.x} ${from.y} H${elbowX} V${to.y} H${to.x}`;
-  }
-
-  return [
-    `M${from.x} ${from.y}`,
-    `H${elbowX - dirX * radius}`,
-    `Q${elbowX} ${from.y} ${elbowX} ${from.y + dirY * radius}`,
-    `V${to.y - dirY * radius}`,
-    `Q${elbowX} ${to.y} ${elbowX + dirX * radius} ${to.y}`,
-    `H${to.x}`,
-  ].join(" ");
-}
-
-// ─── REDUCER ──────────────────────────────────────────────────────────────────
-
 function flowReducer(state, action) {
   switch (action.type) {
     case "ADD_NODE": return { ...state, nodes: [...state.nodes, action.node] };
@@ -1352,77 +1182,28 @@ export default function RobotHMI() {
             {flow.nodes.map(node => {
               const def = getNodeDef(node.type);
               if (!def) return null;
-              const isSel = selected === node.id || selectedIds.includes(node.id);
-              const isSource = connectionState.isSelectingTarget && connectionState.sourceNodeId === node.id;
-              const statusBorder = isSource ? `2px solid #3b82f6` : node.status === "running" ? `2px solid #10b981` : node.status === "done" ? `1px solid ${def.color}55` : node.status === "error" ? `2px solid #dc2626` : isSel ? `2px solid #3b82f6` : `1px solid var(--border)`;
-
               return (
-                <div
+                <NodeCard
                   key={node.id}
-                  className="node-touch-target"
-                  data-node-id={node.id}
-                  data-node-type={node.type}
-                  data-status={node.status || "idle"}
+                  node={node}
+                  def={def}
+                  isSelected={selected === node.id || selectedIds.includes(node.id)}
+                  isSource={connectionState.isSelectingTarget && connectionState.sourceNodeId === node.id}
+                  isPickingTarget={connectionState.isSelectingTarget}
+                  glow={editorSettings.nodeGlow}
                   onMouseDown={e => onNodeMouseDown(e, node.id)}
                   onDoubleClick={e => onNodeDoubleClick(e, node.id)}
-                  style={{
-                    position: "absolute", left: node.x, top: node.y, width: NODE_W, height: "auto",
-                    background: isSel ? "var(--node-bg-selected)" : "var(--node-bg)",
-                    backdropFilter: "blur(12px)",
-                    WebkitBackdropFilter: "blur(12px)",
-                    border: statusBorder,
-                    borderRadius: 14,
-                    boxShadow: editorSettings.nodeGlow
-                      ? (isSel
-                        ? "var(--node-selected-shadow)"
-                        : node.status === "running"
-                          ? "var(--node-running-shadow)"
-                          : "var(--node-shadow)")
-                      : "var(--node-shadow-soft)",
-                    cursor: connectionState.isSelectingTarget && !isSource ? "pointer" : "grab",
-                    userSelect: "none",
-                    overflow: "visible",
-                    transition: "border-color 0.14s ease, box-shadow 0.14s ease",
-                    fontFamily: "'Inter', system-ui, sans-serif",
+                  onHoverChange={setHoveredNode}
+                  onDelete={() => {
+                    dispatch({ type: "DELETE_NODE", id: node.id });
+                    setSelected(node.id === selected ? null : selected);
+                    setSelectedIds(ids => ids.filter(id => id !== node.id));
+                    addLog(`Node deleted: ${def.label}`, "warn");
+                    toast(`"${def.label}" deleted`, "info");
                   }}
-                  onMouseEnter={e => { if (!isSel && node.status !== "running") e.currentTarget.style.borderColor = "var(--border-strong)"; setHoveredNode(node.id); }}
-                  onMouseLeave={e => { if (!isSel && node.status !== "running") e.currentTarget.style.borderColor = "var(--border)"; setHoveredNode(null); }}
-                >
-                  {/* ── Header: emoji + label + status badge + delete ── */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 14px 10px", borderBottom: "1px solid var(--border-soft)" }}>
-                    <div style={{ width: 26, height: 26, borderRadius: 6, background: `${def.color}15`, border: `1px solid ${def.color}25`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0 }}>
-                      {def.icon}
-                    </div>
-                    <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-main)", flex: 1, lineHeight: 1.3 }}>{def.label}</span>
-                    {node.status === "running" && <span style={{ fontSize: 14, padding: "1px 5px", background: "#10b98112", color: "#10b981", borderRadius: 3, border: "1px solid #10b98130", fontWeight: 700, flexShrink: 0 }}>RUN</span>}
-                    {node.status === "done" && <span style={{ fontSize: 14, padding: "1px 5px", background: "#3b82f615", color: "#3b82f6", borderRadius: 3, border: "1px solid #3b82f630", fontWeight: 700, flexShrink: 0 }}>✓</span>}
-                    <button
-                      className="node-del"
-                      title="Delete node"
-                      onClick={e => { e.stopPropagation(); dispatch({ type: "DELETE_NODE", id: node.id }); setSelected(node.id === selected ? null : selected); setSelectedIds(ids => ids.filter(id => id !== node.id)); addLog(`Node deleted: ${def.label}`, "warn"); toast(`"${def.label}" deleted`, "info"); }}
-                      style={{ width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)", borderRadius: 4, color: "#dc2626", cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 0, flexShrink: 0, transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
-                      onMouseEnter={e => { e.currentTarget.style.background = "#dc2626"; e.currentTarget.style.color = "var(--panel-bg)"; e.currentTarget.style.transform = "scale(1.15)"; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = "rgba(220,38,38,0.08)"; e.currentTarget.style.color = "#dc2626"; e.currentTarget.style.transform = "scale(1)"; }}
-                    >×</button>
-                  </div>
-
-                  {/* ── Body: inline params ── */}
-                  <div style={{ padding: "10px 14px 8px" }}>
-                    {def.params && Object.entries(def.params).map(([k, spec]) => (
-                      <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0", lineHeight: 1.6 }}>
-                        <span style={{ fontSize: 14, color: "var(--text-soft)", fontWeight: 500, flexShrink: 0 }}>{spec.label}</span>
-                        <span style={{ fontSize: 14, color: "var(--text-main)", fontWeight: 600, textAlign: "right", maxWidth: "55%", wordBreak: "break-word" }}>{String(node.params[k] ?? spec.default)}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* ── Status progress bar ── */}
-                  <div style={{ height: 3, background: "rgba(0,0,0,0.04)", borderRadius: "0 0 9px 9px", overflow: "hidden" }}>
-                    <div style={{ height: "100%", width: node.status === "running" ? "70%" : node.status === "done" ? "100%" : "0%", background: node.status === "running" ? "#10b981" : node.status === "done" ? def.color : "transparent", transition: "width 0.5s ease" }} />
-                  </div>
-                </div>
-                );
-              })}
+                />
+              );
+            })}
 
               {marquee && (() => {
                 const rect = normalizeRect(marquee.start, marquee.current);
@@ -1584,230 +1365,3 @@ export default function RobotHMI() {
   );
 }
 
-function TopBtn({ children, onClick, disabled, accent, title }) {
-  const disabledColor = accent || "var(--text-soft)";
-  const color = disabled ? disabledColor : accent || "var(--text-soft)";
-  const disabledBackground = disabled && accent ? `${accent}16` : "transparent";
-  return (
-    <button onClick={onClick} disabled={disabled} title={title}
-      style={{ padding: "5px 12px", borderRadius: 6, border: disabled && accent ? `1px solid ${accent}30` : "none", background: disabledBackground, color, cursor: disabled ? "not-allowed" : "pointer", fontSize: 14, fontFamily: "'Inter', sans-serif", fontWeight: 600, letterSpacing: "0.02em", whiteSpace: "nowrap", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)", opacity: disabled ? 0.72 : 1 }}
-      onMouseEnter={e => { if (!disabled) { e.currentTarget.style.background = "var(--button-hover)"; e.currentTarget.style.color = accent || "var(--text-main)"; } }}
-      onMouseLeave={e => { e.currentTarget.style.background = disabledBackground; e.currentTarget.style.color = color; }}>
-      {children}
-    </button>
-  );
-}
-
-function ThemeModeSelector({ value, resolvedTheme, onChange, compact = false }) {
-  return (
-    <div className={`theme-mode-selector ${compact ? "theme-mode-selector-compact" : ""}`} role="group" aria-label="Theme mode">
-      {Object.entries(THEME_MODES).map(([key, mode]) => (
-        <button
-          key={key}
-          className={value === key ? "theme-mode-active" : ""}
-          type="button"
-          title={`${mode.label}${key === "system" ? ` (${resolvedTheme})` : ""}`}
-          aria-pressed={value === key}
-          onClick={() => onChange(key)}
-        >
-          <span aria-hidden="true">{mode.icon}</span>
-          {!compact && <span>{mode.label}</span>}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function SettingsPanel({ settings, resolvedTheme, onChange, onClose, onReset, onSave, onSignOut }) {
-  const [activeSection, setActiveSection] = useState("appearance");
-
-  return (
-    <div className="settings-backdrop" role="dialog" aria-modal="true" aria-labelledby="editor-settings-title" onMouseDown={onClose}>
-      <div className="settings-panel" onMouseDown={event => event.stopPropagation()}>
-        <aside className="settings-nav">
-          <div className="settings-nav-title">Settings</div>
-          <button className={`settings-nav-item ${activeSection === "appearance" ? "settings-nav-item-active" : ""}`} type="button" onClick={() => setActiveSection("appearance")}>appearance</button>
-          <button className={`settings-nav-item ${activeSection === "workspace" ? "settings-nav-item-active" : ""}`} type="button" onClick={() => setActiveSection("workspace")}>workspace</button>
-          <button className="settings-nav-item" type="button" onClick={onSignOut}>sign out</button>
-        </aside>
-
-        <section className="settings-content">
-          <div className="settings-heading-row">
-            <div>
-              <div className="settings-eyebrow">User Settings</div>
-              <h2 id="editor-settings-title">Settings</h2>
-              <p>Editor theme and workspace preferences</p>
-            </div>
-            <button className="settings-back-button" type="button" onClick={onClose}>← Back</button>
-          </div>
-
-          {activeSection === "appearance" ? (
-            <>
-              <div className="settings-card">
-                <div className="settings-card-title">Theme mode</div>
-                <p className="settings-card-description">
-                  Choose the interface theme for the editor shell. System follows your device preference while keeping the workarea grid and canvas tone visible.
-                </p>
-                <ThemeModeSelector
-                  value={settings.themeMode}
-                  resolvedTheme={resolvedTheme}
-                  onChange={value => onChange("themeMode", value)}
-                />
-              </div>
-
-              <div className="settings-card">
-                <div className="settings-card-title">Canvas tone</div>
-                <div className="settings-segmented">
-                  {Object.entries(resolvedTheme === "light" ? LIGHT_CANVAS_TONES : CANVAS_TONES).map(([key, tone]) => (
-                    <button
-                      key={key}
-                      className={settings.canvasTone === key ? "settings-segment-active" : ""}
-                      type="button"
-                      onClick={() => onChange("canvasTone", key)}
-                    >
-                      {tone.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="settings-card">
-                <div className="settings-card-title">Grid density</div>
-                <div className="settings-segmented">
-                  {Object.entries(GRID_DENSITIES).map(([key, density]) => (
-                    <button
-                      key={key}
-                      className={settings.gridDensity === key ? "settings-segment-active" : ""}
-                      type="button"
-                      onClick={() => onChange("gridDensity", key)}
-                    >
-                      {density.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="settings-card">
-                <div className="settings-card-title">Display</div>
-                <SettingToggle label="show grid" checked={settings.showGrid} onChange={value => onChange("showGrid", value)} />
-                <SettingToggle label="minimap" checked={settings.showMinimap} onChange={value => onChange("showMinimap", value)} />
-              </div>
-            </>
-          ) : (
-            <div className="settings-card">
-              <div className="settings-card-title">Workspace</div>
-              <SettingToggle label="compact block sidebar" checked={settings.compactPalette} onChange={value => onChange("compactPalette", value)} />
-              <SettingToggle label="sidebar and node animations" checked={settings.animations} onChange={value => onChange("animations", value)} />
-              <SettingToggle label="node glow" checked={settings.nodeGlow} onChange={value => onChange("nodeGlow", value)} />
-            </div>
-          )}
-
-          <div className="settings-actions">
-            <button className="settings-reset-button" type="button" onClick={onReset}>Reset defaults</button>
-            <button className="settings-save-button" type="button" onClick={onSave}>▣ Save preferences</button>
-          </div>
-        </section>
-      </div>
-    </div>
-  );
-}
-
-function SettingToggle({ label, checked, onChange }) {
-  return (
-    <label className="settings-toggle-row">
-      <span>{label}</span>
-      <input type="checkbox" checked={checked} onChange={event => onChange(event.target.checked)} />
-      <span className="settings-toggle" aria-hidden="true" />
-    </label>
-  );
-}
-
-function DeployModalWrapper({ flow, onClose }) {
-  const [apiOnline, setApiOnline] = useState(false);
-  const mission = useMemo(() => generateMissionSpec(flow, NODE_DEFS), [flow]);
-
-  useEffect(() => {
-    api.health().then(setApiOnline).catch(() => setApiOnline(false));
-  }, []);
-
-  return (
-    <DeployModal
-      mission={mission}
-      rosConnected={apiOnline}
-      onClose={onClose}
-      onDeploy={api.deploy}
-    />
-  );
-}
-
-function CanvasMiniMap({ nodes, selected, selectedIds = [], pan, zoom, canvasSize }) {
-  if (!nodes.length || canvasSize.width <= 0 || canvasSize.height <= 0) return null;
-
-  const width = 168;
-  const height = 108;
-  const viewport = {
-    x: -pan.x / zoom,
-    y: -pan.y / zoom,
-    width: canvasSize.width / zoom,
-    height: canvasSize.height / zoom,
-  };
-  const visibleNodes = nodes.filter(node =>
-    rectsIntersect(
-      getNodePlacementRect(node),
-      viewport,
-    )
-  );
-
-  const minX = viewport.x;
-  const minY = viewport.y;
-  const maxX = viewport.x + viewport.width;
-  const maxY = viewport.y + viewport.height;
-  const worldW = Math.max(1, maxX - minX);
-  const worldH = Math.max(1, maxY - minY);
-  const scale = Math.min(width / worldW, height / worldH);
-  const offsetX = (width - worldW * scale) / 2;
-  const offsetY = (height - worldH * scale) / 2;
-
-  const mapRect = (rect) => ({
-    x: offsetX + (rect.x - minX) * scale,
-    y: offsetY + (rect.y - minY) * scale,
-    width: rect.width * scale,
-    height: rect.height * scale,
-  });
-
-  const viewportRect = mapRect(viewport);
-
-  return (
-    <div className="canvas-minimap" aria-hidden="true">
-      <svg viewBox={`0 0 ${width} ${height}`} width={width} height={height}>
-        <rect x="0" y="0" width={width} height={height} rx="12" fill="var(--panel-bg)" />
-        {visibleNodes.map(node => {
-          const def = getNodeDef(node.type);
-          const rect = mapRect(getNodePlacementRect(node));
-          return (
-            <rect
-              key={node.id}
-              x={rect.x}
-              y={rect.y}
-              width={Math.max(5, rect.width)}
-              height={Math.max(4, rect.height)}
-              rx="2"
-              fill={def?.color || "#3b82f6"}
-              opacity={selected === node.id || selectedIds.includes(node.id) ? "1" : "0.78"}
-            />
-          );
-        })}
-        <rect
-          x={viewportRect.x}
-          y={viewportRect.y}
-          width={viewportRect.width}
-          height={viewportRect.height}
-          rx="4"
-          fill="rgba(56,189,248,0.08)"
-          stroke="#38bdf8"
-          strokeWidth="1.4"
-        />
-      </svg>
-    </div>
-  );
-}
