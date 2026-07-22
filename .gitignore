@@ -17,6 +17,11 @@ release
 !.env.example
 .playwright-mcp/
 
+# Go build artifacts (built by backend/Makefile in Task C2; kept out of git)
+backend/corelyn-studiod
+backend/corelyn-mockbot
+*.db
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

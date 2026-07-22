@@ -11,4 +11,7 @@ contextBridge.exposeInMainWorld('corelyn', {
     chrome: process.versions.chrome,
     electron: process.versions.electron,
   },
+  // Port the sidecar daemon is listening on, passed in via
+  // webPreferences.additionalArguments by main.cjs. See electron/sidecar.cjs.
+  apiPort: process.argv.find((a) => a.startsWith('--api-port='))?.split('=')[1],
 });

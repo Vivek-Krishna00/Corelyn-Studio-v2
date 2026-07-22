@@ -1,12 +1,14 @@
-const { app, BrowserWindow, shell, Menu } = require('electron');
+const { app, BrowserWindow, shell, Menu, dialog } = require('electron');
 const path = require('node:path');
+const { startSidecar } = require('./sidecar.cjs');
 
 // Vite dev server URL used only when running `npm run electron:dev`
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 
 let mainWindow = null;
+let sidecar = null;
 
-function createWindow() {
+function createWindow(apiPort) {
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -20,6 +22,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      additionalArguments: [`--api-port=${apiPort}`],
     },
   });
 
@@ -76,12 +79,24 @@ function setAppMenu() {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   setAppMenu();
-  createWindow();
+
+  try {
+    sidecar = await startSidecar();
+  } catch (err) {
+    dialog.showErrorBox(
+      'Corelyn Studio failed to start',
+      `The backend service did not come online:\n\n${err.message}`,
+    );
+    app.quit();
+    return;
+  }
+
+  createWindow(sidecar.port);
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) createWindow(sidecar.port);
   });
 });
 
