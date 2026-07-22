@@ -8,14 +8,11 @@ const modalBackdrop = {
 };
 
 const modalCard = {
-  // Capped to the viewport minus a 16px safety margin on every side so the
-  // modal always fits at the 700x550 window floor — at the 720px/current
-  // baseline sizes this is a no-op (100vw/100vh - 32px is always looser than
-  // the fixed 720px width and never smaller than the header+tabs+footer's
-  // combined height, so it renders identically to before).
+  // maxWidth capped to viewport minus 16px safety margin per side;
+  // maxHeight kept at 85vh to maintain internal scrolling at default sizes.
   background: "#1e1e1e", borderRadius: 14, width: 720,
   maxWidth: "min(720px, calc(100vw - 32px))",
-  maxHeight: "calc(100vh - 32px)", display: "flex", flexDirection: "column",
+  maxHeight: "85vh", display: "flex", flexDirection: "column",
   boxShadow: "0 16px 48px rgba(0,0,0,0.18)",
   overflow: "hidden",
 };
