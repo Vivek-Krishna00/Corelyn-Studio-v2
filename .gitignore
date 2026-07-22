@@ -20,6 +20,7 @@ release
 # Go build artifacts (built by backend/Makefile in Task C2; kept out of git)
 backend/corelyn-studiod
 backend/corelyn-mockbot
+backend/dist
 *.db
 
 # Editor directories and files

@@ -53,6 +53,12 @@
     "directories": {
       "output": "release"
     },
+    "extraResources": [
+      {
+        "from": "backend/dist/corelyn-studiod",
+        "to": "bin/corelyn-studiod"
+      }
+    ],
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": ["dmg"]
@@ -61,7 +67,7 @@
       "target": ["nsis"]
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": ["AppImage"],
       "category": "Development",
       "maintainer": "Corelyn Robotics <team@corelynrobotics.com>"
     }
