@@ -102,6 +102,21 @@ async function startSidecar() {
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 
+  // spawn reports a missing or non-executable binary through an 'error'
+  // event, and an unhandled one is an uncaught exception that kills the main
+  // process before main.cjs can show anything. On a fresh clone the binary is
+  // simply not built yet, so name it and say what builds it.
+  const spawnFailed = new Promise((_, reject) => {
+    child.on('error', (err) => {
+      reject(err.code === 'ENOENT'
+        ? new Error(`${bin} is missing. Build it with:\n\n    make -C backend dev`)
+        : new Error(`could not start ${bin}: ${err.message}`));
+    });
+  });
+  // The loser of the race below stays pending; if the daemon errors after it
+  // was already healthy, that rejection must not surface as unhandled.
+  spawnFailed.catch(() => {});
+
   child.stdout.on('data', (chunk) => process.stdout.write(`[corelyn-studiod] ${chunk}`));
   child.stderr.on('data', (chunk) => process.stderr.write(`[corelyn-studiod] ${chunk}`));
 
@@ -126,7 +141,7 @@ async function startSidecar() {
   process.on('exit', stop);
 
   try {
-    await waitForHealth(port, Date.now() + HEALTH_TIMEOUT_MS);
+    await Promise.race([waitForHealth(port, Date.now() + HEALTH_TIMEOUT_MS), spawnFailed]);
   } catch (err) {
     stop();
     throw err;
