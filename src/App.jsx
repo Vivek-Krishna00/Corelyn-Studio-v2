@@ -4,9 +4,13 @@ import "./App.css";
 import * as api from "./api/client";
 import DeployModal from "./ros/DeployModal";
 import { generateMissionSpec } from "./ros/missionSpec";
+import NodeInspector from "./inspector/NodeInspector";
+import MissionControl from "./mission/MissionControl";
+import NodePalette from "./palette/NodePalette";
+import SystemLog from "./log/SystemLog";
+import { NODE_DEFS, buildDefaultParams, getNodeDef } from "./nodeDefs";
 import LoginPage from "./LoginPage";
 import SignupPage from "./SignupPage";
-import nodeData from "../shared/nodes.json";
 
 // ─── TYPES & CONSTANTS ───────────────────────────────────────────────────────
 
@@ -17,9 +21,6 @@ const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 2.0;
 const MARQUEE_THRESHOLD = 6;
 
-const NODE_DEFS = nodeData.nodes;
-const CATEGORY_ORDER = nodeData.categories.map(c => c.id);
-const CATEGORY_META = Object.fromEntries(nodeData.categories.map(c => [c.id, { label: c.label, color: c.color }]));
 
 const DEFAULT_EXPANDED_CATEGORIES = {
   flow: false,
@@ -80,18 +81,7 @@ function readEditorSettings() {
   }
 }
 
-function buildDefaultParams(def) {
-  const defaultParams = {};
-  if (def?.params) {
-    Object.entries(def.params).forEach(([key, spec]) => {
-      defaultParams[key] = spec.default;
-    });
-  }
-  return defaultParams;
-}
-
 function uid() { return Math.random().toString(36).slice(2, 9); }
-function getNodeDef(type) { return NODE_DEFS.find(n => n.type === type); }
 function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
 
 function normalizeRect(start, current) {
@@ -1072,122 +1062,28 @@ export default function RobotHMI() {
   const renderRightPanelContent = () => (
     <>
       {rightTab === "props" && (
-        <div>
-          {!selectedNode ? (
-            <div style={{ textAlign: "center", padding: "30px 10px", color: "var(--text-muted)" }}>
-              <div style={{ fontSize: 28, marginBottom: 8, opacity: 0.4 }}>⊙</div>
-              <div style={{ fontSize: 14, lineHeight: 1.6 }}>Select a node on the canvas to edit its properties</div>
-            </div>
-          ) : selectedDef && (
-            <>
-              <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 10px", borderRadius: 20, background: `${selectedDef.color}10`, border: `1px solid ${selectedDef.color}20`, fontSize: 14, color: selectedDef.color, fontWeight: 700, marginBottom: 12 }}>
-                {selectedDef.icon} {selectedDef.label}
-              </div>
-              {selectedDef.params && Object.keys(selectedDef.params).length > 0 ? (
-                Object.entries(selectedDef.params).map(([k, spec]) => (
-                  <div key={k} style={{ marginBottom: 12 }}>
-                    <label style={{ fontSize: 14, letterSpacing: "0.08em", color: "var(--text-soft)", textTransform: "uppercase", display: "block", marginBottom: 5, fontWeight: 700 }}>{spec.label}</label>
-                    {spec.type === "select" ? (
-                      <select value={String(selectedNode.params[k] ?? spec.default)} onChange={e => dispatch({ type: "UPDATE_PARAM", nodeId: selectedNode.id, key: k, value: e.target.value })}
-                        style={{ width: "100%", padding: "6px 8px", background: "var(--input-bg)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-main)", fontSize: 14, fontFamily: "'Inter', sans-serif", outline: "none" }}>
-                        {spec.options?.map(o => <option key={o} value={o}>{o}</option>)}
-                      </select>
-                    ) : spec.type === "boolean" ? (
-                      <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                        <input type="checkbox" checked={Boolean(selectedNode.params[k] ?? spec.default)} onChange={e => dispatch({ type: "UPDATE_PARAM", nodeId: selectedNode.id, key: k, value: e.target.checked })} style={{ accentColor: "#3b82f6" }} />
-                        <span style={{ fontSize: 14, color: "var(--text-muted)" }}>Enabled</span>
-                      </label>
-                    ) : (
-                      <input type={spec.type === "number" ? "number" : "text"} value={String(selectedNode.params[k] ?? spec.default)} onChange={e => dispatch({ type: "UPDATE_PARAM", nodeId: selectedNode.id, key: k, value: spec.type === "number" ? parseFloat(e.target.value) || 0 : e.target.value })} step="0.1"
-                        style={{ width: "100%", padding: "6px 8px", background: "var(--input-bg)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-main)", fontSize: 14, fontFamily: "'Inter', sans-serif", outline: "none", boxSizing: "border-box" }} />
-                    )}
-                  </div>
-                ))
-              ) : <div style={{ fontSize: 14, color: "var(--text-muted)", padding: "6px 0" }}>No configurable parameters</div>}
-
-              <div style={{ height: 1, background: "var(--border)", margin: "10px 0" }} />
-              <div style={{ marginBottom: 8 }}>
-                <label style={{ fontSize: 14, letterSpacing: "0.08em", color: "var(--text-soft)", display: "block", marginBottom: 5, fontWeight: 700 }}>ROS TOPIC</label>
-                <div style={{ padding: "5px 8px", background: "var(--input-bg)", border: "1px solid var(--border)", borderRadius: 5, fontSize: 14, color: "#0891b2" }}>/robot/{selectedDef.type}</div>
-              </div>
-              <div style={{ marginBottom: 12 }}>
-                <label style={{ fontSize: 14, letterSpacing: "0.08em", color: "var(--text-soft)", display: "block", marginBottom: 5, fontWeight: 700 }}>NODE ID</label>
-                <div className="inspector-node-id" style={{ padding: "5px 8px", background: "var(--input-bg)", border: "1px solid var(--border)", borderRadius: 5, fontSize: 14, color: "var(--text-muted)" }}>{selectedNode.id}</div>
-              </div>
-              <button onClick={() => { dispatch({ type: "DELETE_NODE", id: selected }); setSelected(null); setSelectedIds([]); toast("Node deleted", "info"); }}
-                style={{ width: "100%", padding: "8px", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)", borderRadius: 6, color: "#dc2626", cursor: "pointer", fontSize: 14, fontFamily: "'Inter', sans-serif", fontWeight: 600, letterSpacing: "0.03em", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
-                onMouseEnter={e => { e.currentTarget.style.background = "#dc2626"; e.currentTarget.style.color = "white"; }}
-                onMouseLeave={e => { e.currentTarget.style.background = "rgba(220,38,38,0.08)"; e.currentTarget.style.color = "#dc2626"; }}>
-                ⊠ Delete Node
-              </button>
-            </>
-          )}
-        </div>
+        <NodeInspector
+          node={selectedNode}
+          def={selectedDef}
+          onParamChange={(key, value) => dispatch({ type: "UPDATE_PARAM", nodeId: selectedNode.id, key, value })}
+          onDelete={() => { dispatch({ type: "DELETE_NODE", id: selected }); setSelected(null); setSelectedIds([]); toast("Node deleted", "info"); }}
+        />
       )}
 
       {rightTab === "ctl" && (
-        <div>
-          <Section title="Mission Control">
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 8 }}>
-              {[["▶", "Run", "#10b981", runMission, missionRunning], ["⏸", "Pause", "#d97706", stopMission, !missionRunning], ["↺", "Reset", "var(--text-soft)", () => { stopMission(); toast("Reset", "info"); }, false], ["⇥", "Step", "#0891b2", () => addLog("Step executed", "info"), false]].map(([icon, label, color, fn, dis]) => (
-                <button key={label} onClick={fn} disabled={dis} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "10px 6px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--panel-bg)", cursor: dis ? "not-allowed" : "pointer", opacity: dis ? 0.4 : 1, transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)", fontFamily: "'Inter', sans-serif" }}
-                  onMouseEnter={e => { if (!dis) e.currentTarget.style.borderColor = color; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.06)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.boxShadow = "none"; }}>
-                  <span style={{ fontSize: 18, color }}>{icon}</span>
-                  <span style={{ fontSize: 14, color: "var(--text-soft)", letterSpacing: "0.06em" }}>{label.toUpperCase()}</span>
-                </button>
-              ))}
-            </div>
-            <button onClick={() => { stopMission(); setAmr(s => ({ ...s, speed: 0 })); addLog("⚠ EMERGENCY STOP TRIGGERED", "error"); toast("E-STOP ACTIVATED", "error"); }}
-              style={{ width: "100%", padding: 12, borderRadius: 7, border: "2px solid #dc2626", background: "rgba(220,38,38,0.06)", color: "#dc2626", fontFamily: "'Inter', sans-serif", fontWeight: 800, fontSize: 14, letterSpacing: "0.1em", cursor: "pointer", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
-              onMouseEnter={e => { e.currentTarget.style.background = "#dc2626"; e.currentTarget.style.color = "white"; }}
-              onMouseLeave={e => { e.currentTarget.style.background = "rgba(220,38,38,0.06)"; e.currentTarget.style.color = "#dc2626"; }}>
-              ⊗ EMERGENCY STOP
-            </button>
-          </Section>
-
-          <Section title="Manual Jog">
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-              {[["▲", "FWD"], ["▼", "REV"], ["◄", "LEFT"], ["►", "RIGHT"]].map(([icon, label]) => (
-                <button key={label} onMouseDown={() => addLog(`Jog ${label}`, "")}
-                  style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "10px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--panel-bg)", cursor: "pointer", fontFamily: "'Inter', sans-serif", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = "#3b82f6"; e.currentTarget.style.background = "var(--button-hover)"; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.06)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.background = "var(--panel-bg)"; e.currentTarget.style.boxShadow = "none"; }}>
-                  <span style={{ fontSize: 14, color: "#3b82f6" }}>{icon}</span>
-                  <span style={{ fontSize: 14, color: "var(--text-soft)", letterSpacing: "0.06em" }}>{label}</span>
-                </button>
-              ))}
-            </div>
-          </Section>
-
-          <Section title="Calibration">
-            {["IMU", "LiDAR", "Encoders", "Load Cell"].map(s => (
-              <button key={s} onClick={() => { addLog(`Calibrating ${s}...`, "info"); toast(`${s} calibration started`, "info"); }}
-                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--panel-bg)", cursor: "pointer", marginBottom: 5, fontFamily: "'Inter', sans-serif", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = "#0891b2"; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.06)"; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.boxShadow = "none"; }}>
-                <span style={{ fontSize: 14, color: "var(--text-muted)" }}>{s}</span>
-                <span style={{ fontSize: 14, color: "#0891b2", fontWeight: 700 }}>CALIBRATE →</span>
-              </button>
-            ))}
-          </Section>
-        </div>
+        <MissionControl
+          running={missionRunning}
+          onRun={runMission}
+          onStop={stopMission}
+          onReset={() => { stopMission(); toast("Reset", "info"); }}
+          onStep={() => addLog("Step executed", "info")}
+          onEmergencyStop={() => { stopMission(); setAmr(s => ({ ...s, speed: 0 })); addLog("⚠ EMERGENCY STOP TRIGGERED", "error"); toast("E-STOP ACTIVATED", "error"); }}
+          onJog={label => addLog(`Jog ${label}`, "")}
+          onCalibrate={s => { addLog(`Calibrating ${s}...`, "info"); toast(`${s} calibration started`, "info"); }}
+        />
       )}
 
-      {rightTab === "log" && (
-        <div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <span style={{ fontSize: 14, letterSpacing: "0.08em", color: "var(--text-soft)", fontWeight: 700 }}>SYSTEM LOG</span>
-            <button onClick={() => setLogs([])} style={{ padding: "2px 7px", background: "transparent", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text-soft)", cursor: "pointer", fontSize: 14, fontFamily: "'Inter', sans-serif" }}>CLEAR</button>
-          </div>
-          {logs.map((l, i) => (
-            <div key={i} style={{ display: "flex", gap: 7, padding: "4px 0", borderBottom: "1px solid var(--border-soft)" }}>
-              <span className="log-time" style={{ fontSize: 14, color: "var(--text-faint)", flexShrink: 0 }}>{l.time}</span>
-              <span style={{ fontSize: 14, color: l.type === "success" ? "#10b981" : l.type === "error" ? "#dc2626" : l.type === "warn" ? "#d97706" : l.type === "info" ? "#3b82f6" : "var(--text-muted)", lineHeight: 1.5 }}>{l.msg}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      {rightTab === "log" && <SystemLog logs={logs} onClear={() => setLogs([])} />}
     </>
   );
 
@@ -1702,15 +1598,6 @@ function TopBtn({ children, onClick, disabled, accent, title }) {
   );
 }
 
-function Section({ title, children }) {
-  return (
-    <div style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 14, letterSpacing: "0.08em", color: "var(--text-soft)", fontWeight: 700, marginBottom: 8, textTransform: "uppercase" }}>{title}</div>
-      {children}
-    </div>
-  );
-}
-
 function ThemeModeSelector({ value, resolvedTheme, onChange, compact = false }) {
   return (
     <div className={`theme-mode-selector ${compact ? "theme-mode-selector-compact" : ""}`} role="group" aria-label="Theme mode">
@@ -1850,65 +1737,6 @@ function DeployModalWrapper({ flow, onClose }) {
       onClose={onClose}
       onDeploy={api.deploy}
     />
-  );
-}
-
-function NodePalette({ expandedCategories, onToggleCategory, onPaletteDragStart, onAddNode, onClose, isMobile }) {
-  return (
-    <>
-      <div className="palette-header">
-        <div>
-          <div className="palette-eyebrow">System Blocks</div>
-          <div className="palette-title">Blocks</div>
-        </div>
-        {isMobile && (
-          <button className="palette-close" onClick={onClose} aria-label="Close blocks panel">x</button>
-        )}
-      </div>
-      <div className="palette-search" aria-hidden="true">
-        <span>⌕</span>
-        <span>Search Blocks</span>
-      </div>
-      <div className="palette-groups">
-        {CATEGORY_ORDER.map(category => {
-          const meta = CATEGORY_META[category];
-          const items = NODE_DEFS.filter(node => node.category === category);
-          const isOpen = Boolean(expandedCategories[category]);
-          return (
-            <div className="palette-group" key={category}>
-              <button className="palette-group-trigger" onClick={() => onToggleCategory(category)} type="button">
-                <span className={`palette-chevron ${isOpen ? "palette-chevron-open" : ""}`}>›</span>
-                <span className="palette-category-dot" style={{ background: meta.color, boxShadow: `0 0 14px ${meta.color}55` }} />
-                <span className="palette-category-label">{meta.label}</span>
-                <span className="palette-category-count">{items.length}</span>
-              </button>
-              {isOpen && (
-                <div className="palette-block-list">
-                  {items.map((def, index) => {
-                    const blockColor = def.color;
-                    const isWideBlock = def.label.length > 10;
-                    return (
-                      <button
-                        key={def.type}
-                        className={`palette-block ${isWideBlock ? "palette-block-wide" : ""} ${def.type === "stop" ? "palette-block-danger" : ""}`}
-                        draggable
-                        onDragStart={event => onPaletteDragStart(event, def.type)}
-                        onClick={() => onAddNode(def.type)}
-                        type="button"
-                        style={{ "--block-index": index, "--block-color": blockColor }}
-                      >
-                        <span className="palette-block-dot" style={{ background: blockColor }} />
-                        <span className="palette-block-label">{def.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </>
   );
 }
 
