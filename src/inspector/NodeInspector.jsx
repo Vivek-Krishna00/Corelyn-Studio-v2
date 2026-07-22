@@ -23,10 +23,23 @@ function ParamField({ name, spec, value, onChange }) {
     );
   }
 
+  if (spec.type === "number" || spec.type === "text") {
+    return (
+      <input type={spec.type === "number" ? "number" : "text"} value={current}
+        onChange={e => onChange(name, spec.type === "number" ? parseFloat(e.target.value) || 0 : e.target.value)} step="0.1"
+        style={{ width: "100%", padding: "6px 8px", background: "var(--input-bg)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-main)", fontSize: 14, fontFamily: "'Inter', sans-serif", outline: "none", boxSizing: "border-box" }} />
+    );
+  }
+
+  // A type this build does not know how to edit. Show the value rather than
+  // hiding the field, and refuse the edit rather than writing back something
+  // of the wrong shape — the daemon's validator (backend/internal/nodes) lets
+  // unrecognised declared types through, so a bad write would reach the robot.
   return (
-    <input type={spec.type === "number" ? "number" : "text"} value={current}
-      onChange={e => onChange(name, spec.type === "number" ? parseFloat(e.target.value) || 0 : e.target.value)} step="0.1"
-      style={{ width: "100%", padding: "6px 8px", background: "var(--input-bg)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-main)", fontSize: 14, fontFamily: "'Inter', sans-serif", outline: "none", boxSizing: "border-box" }} />
+    <div title={`Unsupported param type "${spec.type}" — read-only`}
+      style={{ width: "100%", padding: "6px 8px", background: "var(--input-bg)", border: "1px dashed var(--border)", borderRadius: 6, color: "var(--text-muted)", fontSize: 14, fontFamily: "'Inter', sans-serif", boxSizing: "border-box" }}>
+      {current}
+    </div>
   );
 }
 
