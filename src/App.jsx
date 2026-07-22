@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useReducer } from "react";
+import { useState, useRef, useCallback, useEffect, useReducer, useMemo } from "react";
 import corelynLogo from "./assets/images/corelyn_logo.png";
 import "./App.css";
 import { ROSProvider, useROS } from "./ros/rosBridge";
@@ -9,13 +9,40 @@ import SignupPage from "./SignupPage";
 
 // ─── ENV ────────────────────────────────────────────────────────────────────
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
-const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:8000";
+const DEFAULT_API_URL = "http://localhost:8000";
+
+function normalizeServiceUrl(value, fallback, allowedProtocols) {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw || /[<>]/.test(raw)) return fallback;
+  try {
+    const parsed = new URL(raw);
+    if (!allowedProtocols.includes(parsed.protocol) || !parsed.hostname) return fallback;
+    return parsed.origin;
+  } catch {
+    return fallback;
+  }
+}
+
+function apiUrlToWsUrl(apiUrl) {
+  return apiUrl.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
+}
+
+function buildMissionStatusWsUrl(baseUrl) {
+  try {
+    return new URL("/ws/mission/status", baseUrl).toString();
+  } catch {
+    return null;
+  }
+}
+
+const API_URL = normalizeServiceUrl(import.meta.env.VITE_API_URL, DEFAULT_API_URL, ["http:", "https:"]);
+const WS_URL = normalizeServiceUrl(import.meta.env.VITE_WS_URL, apiUrlToWsUrl(API_URL), ["ws:", "wss:"]);
 
 // ─── TYPES & CONSTANTS ───────────────────────────────────────────────────────
 
 const NODE_W = 236;
 const NODE_H = 72;
+const NODE_PLACE_GAP = 28;
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 2.0;
 const MARQUEE_THRESHOLD = 6;
@@ -77,6 +104,56 @@ const DEFAULT_EXPANDED_CATEGORIES = {
   sensing: false,
 };
 
+const DEFAULT_EDITOR_SETTINGS = {
+  themeMode: "dark",
+  canvasTone: "midnight",
+  gridDensity: "standard",
+  showGrid: true,
+  showMinimap: true,
+  compactPalette: false,
+  animations: true,
+  nodeGlow: true,
+};
+
+const THEME_MODES = {
+  dark: { label: "Dark", icon: "◐" },
+  light: { label: "Light", icon: "☀" },
+  system: { label: "System", icon: "◒" },
+};
+
+const CANVAS_TONES = {
+  midnight: { label: "Midnight", background: "#111418", dot: "rgba(161,174,187,0.28)", line: "rgba(255,255,255,0.025)" },
+  graphite: { label: "Graphite", background: "#17191c", dot: "rgba(164,176,184,0.22)", line: "rgba(255,255,255,0.035)" },
+  deep: { label: "Deep Blue", background: "#0d1320", dot: "rgba(96,165,250,0.24)", line: "rgba(96,165,250,0.035)" },
+};
+
+const LIGHT_CANVAS_TONES = {
+  midnight: { label: "Frost", background: "#eef3f6", dot: "rgba(69,88,98,0.32)", line: "rgba(41,56,64,0.06)" },
+  graphite: { label: "Mist", background: "#f6f7f8", dot: "rgba(76,91,101,0.24)", line: "rgba(38,48,56,0.055)" },
+  deep: { label: "Sky", background: "#edf6fb", dot: "rgba(37,99,155,0.26)", line: "rgba(37,99,155,0.055)" },
+};
+
+const GRID_DENSITIES = {
+  fine: { label: "Fine", dot: 36, line: 18 },
+  standard: { label: "Standard", dot: 48, line: 24 },
+  wide: { label: "Wide", dot: 64, line: 32 },
+};
+
+function getSystemTheme() {
+  if (typeof window === "undefined" || !window.matchMedia) return "dark";
+  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+function readEditorSettings() {
+  if (typeof window === "undefined") return DEFAULT_EDITOR_SETTINGS;
+  try {
+    const saved = window.localStorage.getItem("corelyn_editor_settings");
+    return saved ? { ...DEFAULT_EDITOR_SETTINGS, ...JSON.parse(saved) } : DEFAULT_EDITOR_SETTINGS;
+  } catch {
+    return DEFAULT_EDITOR_SETTINGS;
+  }
+}
+
 function buildDefaultParams(def) {
   const defaultParams = {};
   if (def?.params) {
@@ -134,6 +211,76 @@ function getPortPos(node, portId, side) {
     x: side === "in" ? node.x : node.x + NODE_W,
     y: node.y + portY(idx, ports.length, NODE_H),
   };
+}
+
+function getEstimatedNodeHeight(typeOrNode) {
+  const type = typeof typeOrNode === "string" ? typeOrNode : typeOrNode?.type;
+  const def = getNodeDef(type);
+  const paramCount = def?.params ? Object.keys(def.params).length : 0;
+  return Math.max(NODE_H, 74 + Math.max(paramCount, 1) * 28);
+}
+
+function getNodePlacementRect(node, gap = 0) {
+  return {
+    x: node.x - gap,
+    y: node.y - gap,
+    width: NODE_W + gap * 2,
+    height: getEstimatedNodeHeight(node) + gap * 2,
+  };
+}
+
+function findOpenNodePosition(type, preferred, nodes) {
+  const candidate = { type, x: preferred.x, y: preferred.y };
+  const overlaps = (next) => nodes.some(node =>
+    rectsIntersect(getNodePlacementRect(next, NODE_PLACE_GAP), getNodePlacementRect(node, NODE_PLACE_GAP)),
+  );
+
+  if (!overlaps(candidate)) return { x: candidate.x, y: candidate.y };
+
+  const stepX = NODE_W + NODE_PLACE_GAP * 2;
+  const stepY = getEstimatedNodeHeight(type) + NODE_PLACE_GAP * 2;
+  for (let ring = 1; ring <= 8; ring++) {
+    for (let row = -ring; row <= ring; row++) {
+      for (let col = -ring; col <= ring; col++) {
+        if (Math.max(Math.abs(row), Math.abs(col)) !== ring) continue;
+        const next = {
+          type,
+          x: preferred.x + col * stepX,
+          y: preferred.y + row * stepY,
+        };
+        if (!overlaps(next)) return { x: next.x, y: next.y };
+      }
+    }
+  }
+
+  return {
+    x: preferred.x + (nodes.length % 5) * stepX,
+    y: preferred.y + Math.floor(nodes.length / 5) * stepY,
+  };
+}
+
+function getSteppedConnectionPath(from, to) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  if (Math.abs(dy) < 2) return `M${from.x} ${from.y} H${to.x}`;
+
+  const dirX = dx >= 0 ? 1 : -1;
+  const dirY = dy >= 0 ? 1 : -1;
+  const elbowX = from.x + dx * 0.58;
+  const radius = Math.min(18, Math.abs(dx) / 4, Math.abs(dy) / 2);
+
+  if (radius < 2) {
+    return `M${from.x} ${from.y} H${elbowX} V${to.y} H${to.x}`;
+  }
+
+  return [
+    `M${from.x} ${from.y}`,
+    `H${elbowX - dirX * radius}`,
+    `Q${elbowX} ${from.y} ${elbowX} ${from.y + dirY * radius}`,
+    `V${to.y - dirY * radius}`,
+    `Q${elbowX} ${to.y} ${elbowX + dirX * radius} ${to.y}`,
+    `H${to.x}`,
+  ].join(" ");
 }
 
 // ─── REDUCER ──────────────────────────────────────────────────────────────────
@@ -236,6 +383,9 @@ export default function RobotHMI() {
   const [expandedCategories, setExpandedCategories] = useState(DEFAULT_EXPANDED_CATEGORIES);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const [marquee, setMarquee] = useState(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [editorSettings, setEditorSettings] = useState(readEditorSettings);
+  const [systemTheme, setSystemTheme] = useState(getSystemTheme);
 
   const canvasRef = useRef(null);
   const importInputRef = useRef(null);
@@ -247,6 +397,20 @@ export default function RobotHMI() {
 
   const selectedNode = flow.nodes.find(n => n.id === selected);
   const selectedDef = selectedNode ? getNodeDef(selectedNode.type) : null;
+  const themeMode = THEME_MODES[editorSettings.themeMode] ? editorSettings.themeMode : "dark";
+  const resolvedTheme = themeMode === "system" ? systemTheme : themeMode;
+  const canvasTones = resolvedTheme === "light" ? LIGHT_CANVAS_TONES : CANVAS_TONES;
+  const canvasTone = canvasTones[editorSettings.canvasTone] || canvasTones.midnight;
+  const gridDensity = GRID_DENSITIES[editorSettings.gridDensity] || GRID_DENSITIES.standard;
+  const canvasBackgroundImage = editorSettings.showGrid
+    ? `radial-gradient(circle at center, ${canvasTone.dot} 1.4px, transparent 1.8px),
+                linear-gradient(${canvasTone.line} 1px, transparent 1px),
+                linear-gradient(90deg, ${canvasTone.line} 1px, transparent 1px)`
+    : "none";
+
+  const updateEditorSetting = useCallback((key, value) => {
+    setEditorSettings(settings => ({ ...settings, [key]: value }));
+  }, []);
 
   function now() {
     const d = new Date();
@@ -256,6 +420,28 @@ export default function RobotHMI() {
   function addLog(msg, type = "") {
     setLogs(l => [{ time: now(), msg, type }, ...l.slice(0, 79)]);
   }
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("corelyn_editor_settings", JSON.stringify(editorSettings));
+    } catch {
+      // Preferences are optional; the editor still works if storage is unavailable.
+    }
+  }, [editorSettings]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return undefined;
+    const media = window.matchMedia("(prefers-color-scheme: light)");
+    const handleChange = () => setSystemTheme(media.matches ? "light" : "dark");
+    handleChange();
+    media.addEventListener?.("change", handleChange);
+    return () => media.removeEventListener?.("change", handleChange);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = resolvedTheme;
+    document.documentElement.style.colorScheme = resolvedTheme;
+  }, [resolvedTheme]);
 
   const toCanvas = useCallback((cx, cy) => {
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -272,11 +458,17 @@ export default function RobotHMI() {
 
     const defaultParams = buildDefaultParams(def);
     const stagger = options.stagger ?? 0;
+    const nodeHeight = getEstimatedNodeHeight(nodeType);
+    const preferred = {
+      x: canvasPoint.x - NODE_W / 2 + stagger,
+      y: canvasPoint.y - nodeHeight / 2 + stagger,
+    };
+    const resolved = findOpenNodePosition(nodeType, preferred, flow.nodes);
     const newNode = {
       id: uid(),
       type: nodeType,
-      x: canvasPoint.x - NODE_W / 2 + stagger,
-      y: canvasPoint.y - NODE_H / 2 + stagger,
+      x: resolved.x,
+      y: resolved.y,
       params: defaultParams,
       status: "idle",
     };
@@ -303,8 +495,7 @@ export default function RobotHMI() {
 
   function addNodeFromPalette(nodeType) {
     const center = getVisibleCanvasCenter();
-    const stagger = (flow.nodes.length % 6) * 24;
-    addNodeToCanvas(nodeType, center, { stagger, closeMobile: isMobile });
+    addNodeToCanvas(nodeType, center, { closeMobile: isMobile });
   }
 
   // ── Mouse handlers ──
@@ -331,7 +522,7 @@ export default function RobotHMI() {
       if (movedEnough) {
         const rect = normalizeRect(marquee.start, marquee.current);
         const ids = flow.nodes
-          .filter(node => rectsIntersect(rect, { x: node.x, y: node.y, width: NODE_W, height: NODE_H }))
+          .filter(node => rectsIntersect(rect, getNodePlacementRect(node)))
           .map(node => node.id);
         setSelectedIds(ids);
         setSelected(ids[0] || null);
@@ -573,10 +764,11 @@ export default function RobotHMI() {
         if (items.length === 0) { toast("No nodes found in file", "error"); return; }
         const canvasRect = canvasRef.current?.getBoundingClientRect();
         const baseX = canvasRect ? (canvasRect.width / 2 - NODE_W / 2) / zoom - pan.x / zoom : 200;
-        const baseY = canvasRect ? (canvasRect.height / 2 - NODE_H / 2) / zoom - pan.y / zoom : 200;
+        const baseY = canvasRect ? canvasRect.height / 2 / zoom - pan.y / zoom : 200;
         const created = [];
         let count = 0;
 
+        const occupied = [...flow.nodes];
         items.forEach((item, idx) => {
           const type = item.type || item.node;
           const def = getNodeDef(type);
@@ -586,11 +778,16 @@ export default function RobotHMI() {
           const newParams = item.params ? { ...defaultParams, ...item.params } : defaultParams;
           const col = idx % 4;
           const row = Math.floor(idx / 4);
-          const x = item.x != null ? item.x : baseX + col * (NODE_W + 30);
-          const y = item.y != null ? item.y : baseY + row * (NODE_H + 20);
-          const newNode = { id: uid(), type, x, y, params: newParams, status: "idle" };
+          const estimatedHeight = getEstimatedNodeHeight(type);
+          const preferred = {
+            x: item.x != null ? item.x : baseX + col * (NODE_W + NODE_PLACE_GAP * 2),
+            y: item.y != null ? item.y : baseY - estimatedHeight / 2 + row * (estimatedHeight + NODE_PLACE_GAP * 2),
+          };
+          const resolved = findOpenNodePosition(type, preferred, occupied);
+          const newNode = { id: uid(), type, x: resolved.x, y: resolved.y, params: newParams, status: "idle" };
           dispatch({ type: "ADD_NODE", node: newNode });
           created.push(newNode);
+          occupied.push(newNode);
           count++;
         });
 
@@ -620,7 +817,7 @@ export default function RobotHMI() {
     };
     reader.readAsText(file);
     e.target.value = "";
-  }, [zoom, pan]);
+  }, [flow.nodes, zoom, pan]);
 
   // ── Port interaction ──
   const onPortMouseDown = useCallback((e, nodeId, portId, side) => {
@@ -817,6 +1014,10 @@ export default function RobotHMI() {
         }
       }
       if (e.key === "Escape") {
+        if (settingsOpen) {
+          setSettingsOpen(false);
+          return;
+        }
         setConnecting(null);
         setSelected(null);
         setSelectedIds([]);
@@ -880,7 +1081,7 @@ export default function RobotHMI() {
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
-  }, [selected, selectedConn, selectedIds, flow.nodes, connectionState.isSelectingTarget]);
+  }, [selected, selectedConn, selectedIds, flow.nodes, connectionState.isSelectingTarget, settingsOpen]);
 
   // ── Tap detection via pointer thresholds (separates drag from tap) ──
   const onNodeTapRef = useRef(onNodeTap);
@@ -963,9 +1164,16 @@ export default function RobotHMI() {
   useEffect(() => {
     let ws = null;
     let mounted = true;
+    const missionStatusWsUrl = buildMissionStatusWsUrl(WS_URL);
+
     const connect = () => {
-      if (!mounted || !API_URL) return;
-      ws = new WebSocket(`${WS_URL}/ws/mission/status`);
+      if (!mounted || !missionStatusWsUrl) return;
+      try {
+        ws = new WebSocket(missionStatusWsUrl);
+      } catch (error) {
+        console.warn("Mission status WebSocket disabled:", error);
+        return;
+      }
       ws.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
@@ -1000,48 +1208,48 @@ export default function RobotHMI() {
       {rightTab === "props" && (
         <div>
           {!selectedNode ? (
-            <div style={{ textAlign: "center", padding: "30px 10px", color: "#7A929C" }}>
+            <div style={{ textAlign: "center", padding: "30px 10px", color: "var(--text-muted)" }}>
               <div style={{ fontSize: 28, marginBottom: 8, opacity: 0.4 }}>⊙</div>
-              <div style={{ fontSize: 11, lineHeight: 1.6 }}>Select a node on the canvas to edit its properties</div>
+              <div style={{ fontSize: 14, lineHeight: 1.6 }}>Select a node on the canvas to edit its properties</div>
             </div>
           ) : selectedDef && (
             <>
-              <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 10px", borderRadius: 20, background: `${selectedDef.color}10`, border: `1px solid ${selectedDef.color}20`, fontSize: 10, color: selectedDef.color, fontWeight: 700, marginBottom: 12 }}>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 10px", borderRadius: 20, background: `${selectedDef.color}10`, border: `1px solid ${selectedDef.color}20`, fontSize: 14, color: selectedDef.color, fontWeight: 700, marginBottom: 12 }}>
                 {selectedDef.icon} {selectedDef.label}
               </div>
               {selectedDef.params && Object.keys(selectedDef.params).length > 0 ? (
                 Object.entries(selectedDef.params).map(([k, spec]) => (
                   <div key={k} style={{ marginBottom: 12 }}>
-                    <label style={{ fontSize: 11, letterSpacing: "0.08em", color: "#A0B4BE", textTransform: "uppercase", display: "block", marginBottom: 5, fontWeight: 700 }}>{spec.label}</label>
+                    <label style={{ fontSize: 14, letterSpacing: "0.08em", color: "var(--text-soft)", textTransform: "uppercase", display: "block", marginBottom: 5, fontWeight: 700 }}>{spec.label}</label>
                     {spec.type === "select" ? (
                       <select value={String(selectedNode.params[k] ?? spec.default)} onChange={e => dispatch({ type: "UPDATE_PARAM", nodeId: selectedNode.id, key: k, value: e.target.value })}
-                        style={{ width: "100%", padding: "6px 8px", background: "#161616", border: "1px solid #2c2c2c", borderRadius: 6, color: "#f2f2f2", fontSize: 11, fontFamily: "'Inter', sans-serif", outline: "none" }}>
+                        style={{ width: "100%", padding: "6px 8px", background: "var(--input-bg)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-main)", fontSize: 14, fontFamily: "'Inter', sans-serif", outline: "none" }}>
                         {spec.options?.map(o => <option key={o} value={o}>{o}</option>)}
                       </select>
                     ) : spec.type === "boolean" ? (
                       <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                         <input type="checkbox" checked={Boolean(selectedNode.params[k] ?? spec.default)} onChange={e => dispatch({ type: "UPDATE_PARAM", nodeId: selectedNode.id, key: k, value: e.target.checked })} style={{ accentColor: "#3b82f6" }} />
-                        <span style={{ fontSize: 11, color: "#8BA2AC" }}>Enabled</span>
+                        <span style={{ fontSize: 14, color: "var(--text-muted)" }}>Enabled</span>
                       </label>
                     ) : (
                       <input type={spec.type === "number" ? "number" : "text"} value={String(selectedNode.params[k] ?? spec.default)} onChange={e => dispatch({ type: "UPDATE_PARAM", nodeId: selectedNode.id, key: k, value: spec.type === "number" ? parseFloat(e.target.value) || 0 : e.target.value })} step="0.1"
-                        style={{ width: "100%", padding: "6px 8px", background: "#161616", border: "1px solid #2c2c2c", borderRadius: 6, color: "#f2f2f2", fontSize: 11, fontFamily: "'Inter', sans-serif", outline: "none", boxSizing: "border-box" }} />
+                        style={{ width: "100%", padding: "6px 8px", background: "var(--input-bg)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-main)", fontSize: 14, fontFamily: "'Inter', sans-serif", outline: "none", boxSizing: "border-box" }} />
                     )}
                   </div>
                 ))
-              ) : <div style={{ fontSize: 10, color: "#7A929C", padding: "6px 0" }}>No configurable parameters</div>}
+              ) : <div style={{ fontSize: 14, color: "var(--text-muted)", padding: "6px 0" }}>No configurable parameters</div>}
 
-              <div style={{ height: 1, background: "#2c2c2c", margin: "10px 0" }} />
+              <div style={{ height: 1, background: "var(--border)", margin: "10px 0" }} />
               <div style={{ marginBottom: 8 }}>
-                <label style={{ fontSize: 9, letterSpacing: "0.08em", color: "#A0B4BE", display: "block", marginBottom: 5, fontWeight: 700 }}>ROS TOPIC</label>
-                <div style={{ padding: "5px 8px", background: "#161616", border: "1px solid #2c2c2c", borderRadius: 5, fontSize: 10, color: "#0891b2" }}>/robot/{selectedDef.type}</div>
+                <label style={{ fontSize: 14, letterSpacing: "0.08em", color: "var(--text-soft)", display: "block", marginBottom: 5, fontWeight: 700 }}>ROS TOPIC</label>
+                <div style={{ padding: "5px 8px", background: "var(--input-bg)", border: "1px solid var(--border)", borderRadius: 5, fontSize: 14, color: "#0891b2" }}>/robot/{selectedDef.type}</div>
               </div>
               <div style={{ marginBottom: 12 }}>
-                <label style={{ fontSize: 9, letterSpacing: "0.08em", color: "#A0B4BE", display: "block", marginBottom: 5, fontWeight: 700 }}>NODE ID</label>
-                <div style={{ padding: "5px 8px", background: "#161616", border: "1px solid #2c2c2c", borderRadius: 5, fontSize: 9, color: "#7A929C" }}>{selectedNode.id}</div>
+                <label style={{ fontSize: 14, letterSpacing: "0.08em", color: "var(--text-soft)", display: "block", marginBottom: 5, fontWeight: 700 }}>NODE ID</label>
+                <div style={{ padding: "5px 8px", background: "var(--input-bg)", border: "1px solid var(--border)", borderRadius: 5, fontSize: 14, color: "var(--text-muted)" }}>{selectedNode.id}</div>
               </div>
               <button onClick={() => { dispatch({ type: "DELETE_NODE", id: selected }); setSelected(null); setSelectedIds([]); toast("Node deleted", "info"); }}
-                style={{ width: "100%", padding: "8px", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)", borderRadius: 6, color: "#dc2626", cursor: "pointer", fontSize: 11, fontFamily: "'Inter', sans-serif", fontWeight: 600, letterSpacing: "0.03em", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
+                style={{ width: "100%", padding: "8px", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)", borderRadius: 6, color: "#dc2626", cursor: "pointer", fontSize: 14, fontFamily: "'Inter', sans-serif", fontWeight: 600, letterSpacing: "0.03em", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
                 onMouseEnter={e => { e.currentTarget.style.background = "#dc2626"; e.currentTarget.style.color = "white"; }}
                 onMouseLeave={e => { e.currentTarget.style.background = "rgba(220,38,38,0.08)"; e.currentTarget.style.color = "#dc2626"; }}>
                 ⊠ Delete Node
@@ -1055,17 +1263,17 @@ export default function RobotHMI() {
         <div>
           <Section title="Mission Control">
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 8 }}>
-              {[["▶", "Run", "#10b981", runMission, missionRunning], ["⏸", "Pause", "#d97706", stopMission, !missionRunning], ["↺", "Reset", "#A0B4BE", () => { stopMission(); toast("Reset", "info"); }, false], ["⇥", "Step", "#0891b2", () => addLog("Step executed", "info"), false]].map(([icon, label, color, fn, dis]) => (
-                <button key={label} onClick={fn} disabled={dis} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "10px 6px", borderRadius: 7, border: "1px solid #2c2c2c", background: "#1e1e1e", cursor: dis ? "not-allowed" : "pointer", opacity: dis ? 0.4 : 1, transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)", fontFamily: "'Inter', sans-serif" }}
+              {[["▶", "Run", "#10b981", runMission, missionRunning], ["⏸", "Pause", "#d97706", stopMission, !missionRunning], ["↺", "Reset", "var(--text-soft)", () => { stopMission(); toast("Reset", "info"); }, false], ["⇥", "Step", "#0891b2", () => addLog("Step executed", "info"), false]].map(([icon, label, color, fn, dis]) => (
+                <button key={label} onClick={fn} disabled={dis} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "10px 6px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--panel-bg)", cursor: dis ? "not-allowed" : "pointer", opacity: dis ? 0.4 : 1, transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)", fontFamily: "'Inter', sans-serif" }}
                   onMouseEnter={e => { if (!dis) e.currentTarget.style.borderColor = color; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.06)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = "#2c2c2c"; e.currentTarget.style.boxShadow = "none"; }}>
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.boxShadow = "none"; }}>
                   <span style={{ fontSize: 18, color }}>{icon}</span>
-                  <span style={{ fontSize: 9, color: "#A0B4BE", letterSpacing: "0.06em" }}>{label.toUpperCase()}</span>
+                  <span style={{ fontSize: 14, color: "var(--text-soft)", letterSpacing: "0.06em" }}>{label.toUpperCase()}</span>
                 </button>
               ))}
             </div>
             <button onClick={() => { stopMission(); setAmr(s => ({ ...s, speed: 0 })); addLog("⚠ EMERGENCY STOP TRIGGERED", "error"); toast("E-STOP ACTIVATED", "error"); }}
-              style={{ width: "100%", padding: 12, borderRadius: 7, border: "2px solid #dc2626", background: "rgba(220,38,38,0.06)", color: "#dc2626", fontFamily: "'Inter', sans-serif", fontWeight: 800, fontSize: 12, letterSpacing: "0.1em", cursor: "pointer", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
+              style={{ width: "100%", padding: 12, borderRadius: 7, border: "2px solid #dc2626", background: "rgba(220,38,38,0.06)", color: "#dc2626", fontFamily: "'Inter', sans-serif", fontWeight: 800, fontSize: 14, letterSpacing: "0.1em", cursor: "pointer", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
               onMouseEnter={e => { e.currentTarget.style.background = "#dc2626"; e.currentTarget.style.color = "white"; }}
               onMouseLeave={e => { e.currentTarget.style.background = "rgba(220,38,38,0.06)"; e.currentTarget.style.color = "#dc2626"; }}>
               ⊗ EMERGENCY STOP
@@ -1076,11 +1284,11 @@ export default function RobotHMI() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
               {[["▲", "FWD"], ["▼", "REV"], ["◄", "LEFT"], ["►", "RIGHT"]].map(([icon, label]) => (
                 <button key={label} onMouseDown={() => addLog(`Jog ${label}`, "")}
-                  style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "10px", borderRadius: 7, border: "1px solid #2c2c2c", background: "#1e1e1e", cursor: "pointer", fontFamily: "'Inter', sans-serif", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = "#3b82f6"; e.currentTarget.style.background = "#161616"; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.06)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = "#2c2c2c"; e.currentTarget.style.background = "#1e1e1e"; e.currentTarget.style.boxShadow = "none"; }}>
-                  <span style={{ fontSize: 16, color: "#3b82f6" }}>{icon}</span>
-                  <span style={{ fontSize: 9, color: "#A0B4BE", letterSpacing: "0.06em" }}>{label}</span>
+                  style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "10px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--panel-bg)", cursor: "pointer", fontFamily: "'Inter', sans-serif", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = "#3b82f6"; e.currentTarget.style.background = "var(--button-hover)"; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.06)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.background = "var(--panel-bg)"; e.currentTarget.style.boxShadow = "none"; }}>
+                  <span style={{ fontSize: 14, color: "#3b82f6" }}>{icon}</span>
+                  <span style={{ fontSize: 14, color: "var(--text-soft)", letterSpacing: "0.06em" }}>{label}</span>
                 </button>
               ))}
             </div>
@@ -1089,11 +1297,11 @@ export default function RobotHMI() {
           <Section title="Calibration">
             {["IMU", "LiDAR", "Encoders", "Load Cell"].map(s => (
               <button key={s} onClick={() => { addLog(`Calibrating ${s}...`, "info"); toast(`${s} calibration started`, "info"); }}
-                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #2c2c2c", background: "#1e1e1e", cursor: "pointer", marginBottom: 5, fontFamily: "'Inter', sans-serif", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--panel-bg)", cursor: "pointer", marginBottom: 5, fontFamily: "'Inter', sans-serif", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
                 onMouseEnter={e => { e.currentTarget.style.borderColor = "#0891b2"; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.06)"; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = "#2c2c2c"; e.currentTarget.style.boxShadow = "none"; }}>
-                <span style={{ fontSize: 10, color: "#8BA2AC" }}>{s}</span>
-                <span style={{ fontSize: 9, color: "#0891b2", fontWeight: 700 }}>CALIBRATE →</span>
+                onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.boxShadow = "none"; }}>
+                <span style={{ fontSize: 14, color: "var(--text-muted)" }}>{s}</span>
+                <span style={{ fontSize: 14, color: "#0891b2", fontWeight: 700 }}>CALIBRATE →</span>
               </button>
             ))}
           </Section>
@@ -1103,13 +1311,13 @@ export default function RobotHMI() {
       {rightTab === "log" && (
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <span style={{ fontSize: 9, letterSpacing: "0.08em", color: "#A0B4BE", fontWeight: 700 }}>SYSTEM LOG</span>
-            <button onClick={() => setLogs([])} style={{ padding: "2px 7px", background: "transparent", border: "1px solid #2c2c2c", borderRadius: 4, color: "#A0B4BE", cursor: "pointer", fontSize: 9, fontFamily: "'Inter', sans-serif" }}>CLEAR</button>
+            <span style={{ fontSize: 14, letterSpacing: "0.08em", color: "var(--text-soft)", fontWeight: 700 }}>SYSTEM LOG</span>
+            <button onClick={() => setLogs([])} style={{ padding: "2px 7px", background: "transparent", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text-soft)", cursor: "pointer", fontSize: 14, fontFamily: "'Inter', sans-serif" }}>CLEAR</button>
           </div>
           {logs.map((l, i) => (
-            <div key={i} style={{ display: "flex", gap: 7, padding: "4px 0", borderBottom: "1px solid #262626" }}>
-              <span style={{ fontSize: 9, color: "#3a3a3a", flexShrink: 0 }}>{l.time}</span>
-              <span style={{ fontSize: 9, color: l.type === "success" ? "#10b981" : l.type === "error" ? "#dc2626" : l.type === "warn" ? "#d97706" : l.type === "info" ? "#3b82f6" : "#8BA2AC", lineHeight: 1.5 }}>{l.msg}</span>
+            <div key={i} style={{ display: "flex", gap: 7, padding: "4px 0", borderBottom: "1px solid var(--border-soft)" }}>
+              <span style={{ fontSize: 14, color: "var(--text-faint)", flexShrink: 0 }}>{l.time}</span>
+              <span style={{ fontSize: 14, color: l.type === "success" ? "#10b981" : l.type === "error" ? "#dc2626" : l.type === "warn" ? "#d97706" : l.type === "info" ? "#3b82f6" : "var(--text-muted)", lineHeight: 1.5 }}>{l.msg}</span>
             </div>
           ))}
         </div>
@@ -1126,31 +1334,36 @@ export default function RobotHMI() {
 
   return (
     <ROSProvider>
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", width: "100vw", background: "#161616", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#f2f2f2", overflow: "hidden" }}>
+    <div
+      className={`app-shell ${editorSettings.compactPalette ? "palette-compact" : ""} ${editorSettings.animations ? "" : "motion-reduced"}`}
+      data-theme={resolvedTheme}
+      data-theme-mode={themeMode}
+      style={{ display: "flex", flexDirection: "column", height: "100vh", width: "100vw", background: "var(--app-bg)", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", fontSize: 14, color: "var(--text-main)", overflow: "hidden" }}
+    >
 
       {/* ── TOPBAR ── */}
-      <div style={{ display: "flex", alignItems: "center", height: 52, padding: "0 16px", background: "#161616", borderBottom: "1px solid #2c2c2c", flexShrink: 0, zIndex: 100, gap: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+      <div style={{ display: "flex", alignItems: "center", height: 52, padding: "0 16px", background: "var(--topbar-bg)", borderBottom: "1px solid var(--border)", flexShrink: 0, zIndex: 100, gap: 10, boxShadow: "var(--shadow-subtle)" }}>
         {/* Logo */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0, minWidth: 230 }}>
           <img src={corelynLogo} alt="Corelyn" style={{ height: 40, width: "auto", display: "block" }} />
           <div>
-            <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: "0.015em" }}>
-              <span style={{ color: "#C9D3D8" }}>Corelyn</span><span style={{ color: "#8BA2AC" }}> Robotics</span>
+            <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: "0.015em" }}>
+              <span style={{ color: "var(--brand-corelyn)" }}>Corelyn</span><span style={{ color: "var(--brand-robotics)" }}> Robotics</span>
             </div>
-            <div style={{ fontSize: 10, fontWeight: 600, color: "#A0B4BE", letterSpacing: "0.12em", lineHeight: 1.4 }}>PROGRAM | DEPLOY | DOMINATE</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-soft)", letterSpacing: "0.12em", lineHeight: 1.4, whiteSpace: "nowrap" }}>PROGRAM | DEPLOY | DOMINATE</div>
           </div>
         </div>
 
-        <div style={{ width: 1, height: 28, background: "#2c2c2c", margin: "0 4px" }} />
+        <div style={{ width: 1, height: 28, background: "var(--border)", margin: "0 4px" }} />
 
         {/* Mission status pill */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "#161616", border: "1px solid #2c2c2c", borderRadius: 6, fontSize: 10, color: "#A0B4BE" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "var(--panel-bg)", border: "1px solid var(--border)", borderRadius: 6, fontSize: 14, color: "var(--text-soft)", whiteSpace: "nowrap", flexShrink: 0 }}>
           <div style={{ width: 7, height: 7, borderRadius: "50%", background: missionRunning ? "#10b981" : "#3a3a3a", animation: missionRunning ? "pulse 1.4s infinite" : "none" }} />
           {missionRunning ? "RUNNING" : "IDLE"} · {flow.nodes.length} NODES
         </div>
 
         {/* Backend status */}
-        <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 8px", background: backendOnline ? "#161616" : "rgba(245,158,11,0.12)", border: `1px solid ${backendOnline ? "#2c2c2c" : "rgba(245,158,11,0.25)"}`, borderRadius: 6, fontSize: 9, color: backendOnline ? "#10b981" : "#d97706", fontWeight: 600, letterSpacing: "0.04em" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 8px", background: backendOnline ? "var(--panel-bg)" : "rgba(245,158,11,0.12)", border: `1px solid ${backendOnline ? "var(--border)" : "rgba(245,158,11,0.25)"}`, borderRadius: 6, fontSize: 14, color: backendOnline ? "#10b981" : "#d97706", fontWeight: 600, letterSpacing: "0.04em", whiteSpace: "nowrap", flexShrink: 0 }}>
           <div style={{ width: 6, height: 6, borderRadius: "50%", background: backendOnline ? "#10b981" : "#d97706" }} />
           {backendOnline ? "API ONLINE" : "DEMO MODE"}
         </div>
@@ -1158,9 +1371,9 @@ export default function RobotHMI() {
         <div style={{ flex: 1 }} />
 
         {/* Center toolbar - N8N style */}
-        <div className="topbar-desktop-only" style={{ display: "flex", alignItems: "center", gap: 4, background: "#161616", border: "1px solid #2c2c2c", borderRadius: 8, padding: 3 }}>
+        <div className="topbar-desktop-only" style={{ display: "flex", alignItems: "center", gap: 4, background: "var(--panel-bg)", border: "1px solid var(--border)", borderRadius: 8, padding: 3, flexShrink: 0, whiteSpace: "nowrap" }}>
           <TopBtn onClick={() => { dispatch({ type: "CLEAR" }); setSelected(null); setSelectedIds([]); setMarquee(null); toast("Canvas cleared", "info"); }} title="Clear canvas">⊠ Clear</TopBtn>
-          <div style={{ width: 1, height: 20, background: "#2c2c2c" }} />
+          <div style={{ width: 1, height: 20, background: "var(--border)" }} />
           <TopBtn onClick={runMission} disabled={missionRunning} accent="#10b981" title="Run mission">{backendOnline ? "▶ Run" : "▶ Demo Run"}</TopBtn>
           <TopBtn onClick={stopMission} disabled={!missionRunning} accent="#dc2626" title="Stop">■ Stop</TopBtn>
           <TopBtn onClick={() => setDeployModalOpen(true)} disabled={flow.nodes.length === 0} accent="#8b5cf6" title="Deploy mission to robot">🚀 Deploy</TopBtn>
@@ -1183,14 +1396,14 @@ export default function RobotHMI() {
             toast(`${steps.length} steps exported`, "success");
             addLog(`📋 Exported ${steps.length} step-by-step instructions`, "info");
           }} disabled={flow.nodes.length === 0} accent="#0891b2" title="Export mission as JSON">⬇ Export</TopBtn>
-          <div style={{ width: 1, height: 20, background: "#2c2c2c" }} />
+          <div style={{ width: 1, height: 20, background: "var(--border)" }} />
           <input ref={importInputRef} type="file" accept=".json" style={{ display: "none" }} onChange={handleImport} />
           <TopBtn onClick={() => importInputRef.current?.click()} accent="#8BA2AC" title="Import nodes from JSON">📥 Import</TopBtn>
-          <div style={{ width: 1, height: 20, background: "#2c2c2c" }} />
+          <div style={{ width: 1, height: 20, background: "var(--border)" }} />
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            {connectionState.isSelectingTarget && <span style={{ fontSize: 9, color: "#3b82f6", fontWeight: 600, letterSpacing: "0.04em" }}>TAP→</span>}
+            {connectionState.isSelectingTarget && <span style={{ fontSize: 14, color: "#3b82f6", fontWeight: 600, letterSpacing: "0.04em", whiteSpace: "nowrap" }}>TAP→</span>}
             <button onClick={() => setChainMode(c => !c)} title="Chain mode — auto-advance source after connection"
-              style={{ padding: "2px 6px", borderRadius: 4, border: chainMode ? "1px solid #3b82f6" : "1px solid #2c2c2c", background: chainMode ? "rgba(59,130,246,0.08)" : "transparent", color: chainMode ? "#3b82f6" : "#7A929C", cursor: "pointer", fontSize: 9, fontFamily: "'Inter', sans-serif", fontWeight: 700, letterSpacing: "0.04em", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}>
+              style={{ padding: "2px 6px", borderRadius: 4, border: chainMode ? "1px solid #3b82f6" : "1px solid var(--border)", background: chainMode ? "rgba(59,130,246,0.08)" : "transparent", color: chainMode ? "#3b82f6" : "var(--text-muted)", cursor: "pointer", fontSize: 14, fontFamily: "'Inter', sans-serif", fontWeight: 700, letterSpacing: "0.04em", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)", whiteSpace: "nowrap" }}>
               {chainMode ? "CHAIN ⛓" : "CHAIN"}
             </button>
           </div>
@@ -1199,37 +1412,40 @@ export default function RobotHMI() {
         <div style={{ flex: 1 }} />
 
         {/* Stats - desktop only */}
-        <div className="topbar-stats-desktop" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <div className="topbar-stats-desktop" style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
           {[["BATT", `${Math.round(amr.battery)}%`, battColor], ["VEL", `${amr.speed.toFixed(2)}m/s`, "#3b82f6"], ["CONNS", flow.connections.length, "#7c3aed"]].map(([l, v, c]) => (
-            <div key={l} style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 8px", background: "#161616", border: "1px solid #2c2c2c", borderRadius: 5, fontSize: 10 }}>
-              <span style={{ color: "#7A929C" }}>{l}</span>
+            <div key={l} style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 8px", background: "var(--panel-bg)", border: "1px solid var(--border)", borderRadius: 5, fontSize: 14, whiteSpace: "nowrap" }}>
+              <span style={{ color: "var(--text-muted)" }}>{l}</span>
               <span style={{ color: c, fontWeight: 700 }}>{v}</span>
             </div>
           ))}
         </div>
 
         {/* Desktop sidebar toggle */}
-        <button className="topbar-desktop-only" onClick={() => setSidebarOpen(s => !s)} style={{ padding: "5px 8px", background: "transparent", border: "1px solid #2c2c2c", borderRadius: 5, color: "#A0B4BE", cursor: "pointer", fontSize: 12, transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
-          onMouseEnter={e => { e.currentTarget.style.background = "#262626"; e.currentTarget.style.color = "#f2f2f2"; }}
-          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#A0B4BE"; }}>
+        <button className="topbar-desktop-only" onClick={() => setSidebarOpen(s => !s)} style={{ padding: "5px 8px", background: "transparent", border: "1px solid var(--border)", borderRadius: 5, color: "var(--text-soft)", cursor: "pointer", fontSize: 14, transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
+          onMouseEnter={e => { e.currentTarget.style.background = "var(--button-hover)"; e.currentTarget.style.color = "var(--text-main)"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-soft)"; }}>
           {sidebarOpen ? "⟨" : "⟩"}
         </button>
 
         {/* Mobile menu toggles */}
         <div className="topbar-mobile-toggle" style={{ alignItems: "center", gap: 6 }}>
-          <button onClick={() => setMobileSidebarOpen(s => !s)} style={{ padding: "6px 10px", background: mobileSidebarOpen ? "#262626" : "transparent", border: "1px solid #2c2c2c", borderRadius: 6, color: "#A0B4BE", cursor: "pointer", fontSize: 13, transition: "all 0.2s" }}>
+          <button onClick={() => setMobileSidebarOpen(s => !s)} style={{ padding: "6px 10px", background: mobileSidebarOpen ? "var(--button-hover)" : "transparent", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-soft)", cursor: "pointer", fontSize: 14, transition: "all 0.2s" }}>
             ☰
           </button>
-          <button onClick={() => { if (selected) setMobileRightOpen(s => !s); }} style={{ padding: "6px 10px", background: mobileRightOpen ? "#262626" : "transparent", border: "1px solid #2c2c2c", borderRadius: 6, color: selected ? "#A0B4BE" : "#3a3a3a", cursor: selected ? "pointer" : "default", fontSize: 13, transition: "all 0.2s" }}>
+          <button onClick={() => { if (selected) setMobileRightOpen(s => !s); }} style={{ padding: "6px 10px", background: mobileRightOpen ? "var(--button-hover)" : "transparent", border: "1px solid var(--border)", borderRadius: 6, color: selected ? "var(--text-soft)" : "var(--text-faint)", cursor: selected ? "pointer" : "default", fontSize: 14, transition: "all 0.2s" }}>
             ⚙
           </button>
         </div>
 
-        <button onClick={() => setIsLoggedIn(false)} style={{ padding: "5px 8px", background: "transparent", border: "1px solid #2c2c2c", borderRadius: 5, color: "#7A929C", cursor: "pointer", fontSize: 11, fontFamily: "'Inter', sans-serif", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
-          onMouseEnter={e => { e.currentTarget.style.background = "#262626"; e.currentTarget.style.color = "#f2f2f2"; }}
-          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#7A929C"; }}
-          title="Sign out">
-          ⎋
+        <button
+          className={`settings-tab-button ${settingsOpen ? "settings-tab-button-active" : ""}`}
+          onClick={() => setSettingsOpen(true)}
+          title="Open editor settings"
+          type="button"
+        >
+          <span aria-hidden="true">⚙</span>
+          <span>Settings</span>
         </button>
       </div>
 
@@ -1285,12 +1501,9 @@ export default function RobotHMI() {
           onDragLeave={() => setDragOverCanvas(false)}
           style={{
             flex: 1, position: "relative", overflow: "hidden",
-            background: "#111418",
-            backgroundImage:
-`radial-gradient(circle at center, rgba(161,174,187,0.28) 1.4px, transparent 1.8px),
-                linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px)`,
-            backgroundSize: "48px 48px, 24px 24px, 24px 24px",
+            backgroundColor: canvasTone.background,
+            backgroundImage: canvasBackgroundImage,
+            backgroundSize: `${gridDensity.dot}px ${gridDensity.dot}px, ${gridDensity.line}px ${gridDensity.line}px, ${gridDensity.line}px ${gridDensity.line}px`,
             cursor: spaceHeld ? "grab" : isPanning ? "grabbing" : connecting ? "crosshair" : connectionState.isSelectingTarget ? "cell" : "default",
             outline: dragOverCanvas ? "2px dashed #3b82f6" : "none",
             outlineOffset: -2,
@@ -1314,45 +1527,44 @@ export default function RobotHMI() {
 
             {/* SVG connections */}
             <svg style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", overflow: "visible", pointerEvents: "none" }}>
-              <defs>
-                <marker id="arr" markerWidth="8" markerHeight="6" refX="6" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#7A929C" /></marker>
-                <marker id="arr-on" markerWidth="8" markerHeight="6" refX="6" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#10b981" /></marker>
-                <marker id="arr-err" markerWidth="8" markerHeight="6" refX="6" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#dc2626" /></marker>
-                <marker id="arr-sel" markerWidth="8" markerHeight="6" refX="6" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#3b82f6" /></marker>
-                <marker id="arr-hov" markerWidth="8" markerHeight="6" refX="6" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#60a5fa" /></marker>
-              </defs>
               {flow.connections.map(conn => {
                 const fn = flow.nodes.find(n => n.id === conn.fromNode);
                 const tn = flow.nodes.find(n => n.id === conn.toNode);
                 if (!fn || !tn) return null;
                 const from = getPortPos(fn, conn.fromPort, "out");
                 const to = getPortPos(tn, conn.toPort, "in");
-                const cx = (from.x + to.x) / 2;
                 const isActive = fn.status === "running";
                 const isErr = ["fail","false","err","low","blocked"].includes(conn.fromPort);
                 const isSel = selectedConn === conn.id;
                 const isHov = hoveredConn === conn.id;
-                const stroke = isSel ? "#3b82f6" : isHov ? "#60a5fa" : isErr ? "#dc2626" : isActive ? "#10b981" : "#7A929C";
-                const mkr = isSel ? "url(#arr-sel)" : isHov ? "url(#arr-hov)" : isErr ? "url(#arr-err)" : isActive ? "url(#arr-on)" : "url(#arr)";
-                const midX = cx;
+                const stroke = isSel ? "#38bdf8" : isHov ? "#67e8f9" : isErr ? "#f87171" : isActive ? "#2dd4bf" : "#5ab7c5";
+                const midX = from.x + (to.x - from.x) * 0.58;
                 const midY = (from.y + to.y) / 2;
-                const d = `M${from.x} ${from.y} C${cx} ${from.y} ${cx} ${to.y} ${to.x} ${to.y}`;
+                const d = getSteppedConnectionPath(from, to);
                 return (
                   <g key={conn.id}>
                     {/* Invisible wide hit area */}
-                    <path d={d} fill="none" stroke="transparent" strokeWidth={16}
+                    <path d={d} fill="none" stroke="transparent" strokeWidth={22}
                       style={{ pointerEvents: "stroke", cursor: "pointer" }}
                       onMouseEnter={() => setHoveredConn(conn.id)}
                       onMouseLeave={() => setHoveredConn(null)}
                       onClick={e => { e.stopPropagation(); setSelectedConn(isSel ? null : conn.id); setSelected(null); setSelectedIds([]); }}
                     />
                     {/* Glow behind active */}
-                    {isActive && <path d={d} fill="none" stroke="#10b981" strokeWidth={6} opacity={0.12} />}
+                    {isActive && <path className="connection-wire-glow" d={d} fill="none" stroke="#2dd4bf" strokeWidth={13} strokeDasharray="22 24" strokeLinecap="butt" opacity={0.16} />}
                     {/* Selected glow */}
-                    {isSel && <path d={d} fill="none" stroke="#3b82f6" strokeWidth={6} opacity={0.15} />}
+                    {isSel && <path className="connection-wire-glow" d={d} fill="none" stroke="#38bdf8" strokeWidth={14} strokeDasharray="22 24" strokeLinecap="butt" opacity={0.2} />}
                     {/* Main visible wire */}
-                    <path d={d} fill="none" stroke={stroke} strokeWidth={isSel ? 2.5 : isHov ? 2 : isActive ? 2.5 : 1.5} markerEnd={mkr}
-                      style={{ pointerEvents: "none", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
+                    <path
+                      className="connection-wire"
+                      d={d}
+                      fill="none"
+                      stroke={stroke}
+                      strokeWidth={isSel || isHov ? 9 : 8}
+                      strokeDasharray="22 24"
+                      strokeLinecap="butt"
+                      strokeLinejoin="round"
+                      style={{ pointerEvents: "none", transition: "stroke 0.2s cubic-bezier(0.4, 0, 0.2, 1), stroke-width 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
                     />
                     {/* Midpoint delete button — shown on hover or selected */}
                     {(isHov || isSel) && (
@@ -1362,7 +1574,7 @@ export default function RobotHMI() {
                         onMouseEnter={() => setHoveredConn(conn.id)}
                         onMouseLeave={() => setHoveredConn(null)}
                       >
-                        <circle r={10} fill="#1e1e1e" stroke="#dc2626" strokeWidth={1.5} style={{ filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.12))" }} />
+                        <circle r={10} fill="var(--panel-bg)" stroke="#dc2626" strokeWidth={1.5} style={{ filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.12))" }} />
                         <text x={0} y={4} textAnchor="middle" fontSize={12} fill="#dc2626" fontFamily="monospace" fontWeight="700">×</text>
                       </g>
                     )}
@@ -1370,8 +1582,8 @@ export default function RobotHMI() {
                 );
               })}
               {connecting && (() => {
-                const cx = (connecting.x + mousePos.x) / 2;
-                return <path d={`M${connecting.x} ${connecting.y} C${cx} ${connecting.y} ${cx} ${mousePos.y} ${mousePos.x} ${mousePos.y}`} fill="none" stroke="#3b82f6" strokeWidth={2} strokeDasharray="5 3" opacity={0.85} style={{ transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }} />;
+                const d = getSteppedConnectionPath({ x: connecting.x, y: connecting.y }, mousePos);
+                return <path className="connection-wire connection-wire-preview" d={d} fill="none" stroke="#38bdf8" strokeWidth={8} strokeDasharray="22 24" strokeLinecap="butt" strokeLinejoin="round" opacity={0.85} style={{ transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }} />;
               })()}
             </svg>
 
@@ -1381,7 +1593,7 @@ export default function RobotHMI() {
               if (!def) return null;
               const isSel = selected === node.id || selectedIds.includes(node.id);
               const isSource = connectionState.isSelectingTarget && connectionState.sourceNodeId === node.id;
-              const statusBorder = isSource ? `2px solid #3b82f6` : node.status === "running" ? `2px solid #10b981` : node.status === "done" ? `1px solid ${def.color}55` : node.status === "error" ? `2px solid #dc2626` : isSel ? `2px solid #3b82f6` : `1px solid #2c2c2c`;
+              const statusBorder = isSource ? `2px solid #3b82f6` : node.status === "running" ? `2px solid #10b981` : node.status === "done" ? `1px solid ${def.color}55` : node.status === "error" ? `2px solid #dc2626` : isSel ? `2px solid #3b82f6` : `1px solid var(--border)`;
 
               return (
                 <div
@@ -1391,39 +1603,41 @@ export default function RobotHMI() {
                   onDoubleClick={e => onNodeDoubleClick(e, node.id)}
                   style={{
                     position: "absolute", left: node.x, top: node.y, width: NODE_W, height: "auto",
-                    background: isSel ? "rgba(24,31,39,0.96)" : "rgba(18,24,31,0.92)",
+                    background: isSel ? "var(--node-bg-selected)" : "var(--node-bg)",
                     backdropFilter: "blur(12px)",
                     WebkitBackdropFilter: "blur(12px)",
                     border: statusBorder,
                     borderRadius: 14,
-                    boxShadow: isSel
-                      ? "0 0 0 3px rgba(56,189,248,0.22), 0 18px 40px rgba(0,0,0,0.26)"
-                      : node.status === "running"
-                        ? "0 0 0 3px rgba(16,185,129,0.16), 0 18px 40px rgba(0,0,0,0.24)"
-                        : "0 14px 34px rgba(0,0,0,0.22)",
+                    boxShadow: editorSettings.nodeGlow
+                      ? (isSel
+                        ? "var(--node-selected-shadow)"
+                        : node.status === "running"
+                          ? "var(--node-running-shadow)"
+                          : "var(--node-shadow)")
+                      : "var(--node-shadow-soft)",
                     cursor: connectionState.isSelectingTarget && !isSource ? "pointer" : "grab",
                     userSelect: "none",
                     overflow: "visible",
                     transition: "border-color 0.14s ease, box-shadow 0.14s ease",
                     fontFamily: "'Inter', system-ui, sans-serif",
                   }}
-                  onMouseEnter={e => { if (!isSel && node.status !== "running") e.currentTarget.style.borderColor = "#3a3a3a"; setHoveredNode(node.id); }}
-                  onMouseLeave={e => { if (!isSel && node.status !== "running") e.currentTarget.style.borderColor = "#2c2c2c"; setHoveredNode(null); }}
+                  onMouseEnter={e => { if (!isSel && node.status !== "running") e.currentTarget.style.borderColor = "var(--border-strong)"; setHoveredNode(node.id); }}
+                  onMouseLeave={e => { if (!isSel && node.status !== "running") e.currentTarget.style.borderColor = "var(--border)"; setHoveredNode(null); }}
                 >
                   {/* ── Header: emoji + label + status badge + delete ── */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 14px 10px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 14px 10px", borderBottom: "1px solid var(--border-soft)" }}>
                     <div style={{ width: 26, height: 26, borderRadius: 6, background: `${def.color}15`, border: `1px solid ${def.color}25`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0 }}>
                       {def.icon}
                     </div>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: "#f2f2f2", flex: 1, lineHeight: 1.3 }}>{def.label}</span>
-                    {node.status === "running" && <span style={{ fontSize: 8, padding: "1px 5px", background: "#10b98112", color: "#10b981", borderRadius: 3, border: "1px solid #10b98130", fontWeight: 700, flexShrink: 0 }}>RUN</span>}
-                    {node.status === "done" && <span style={{ fontSize: 8, padding: "1px 5px", background: "#3b82f615", color: "#3b82f6", borderRadius: 3, border: "1px solid #3b82f630", fontWeight: 700, flexShrink: 0 }}>✓</span>}
+                    <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-main)", flex: 1, lineHeight: 1.3 }}>{def.label}</span>
+                    {node.status === "running" && <span style={{ fontSize: 14, padding: "1px 5px", background: "#10b98112", color: "#10b981", borderRadius: 3, border: "1px solid #10b98130", fontWeight: 700, flexShrink: 0 }}>RUN</span>}
+                    {node.status === "done" && <span style={{ fontSize: 14, padding: "1px 5px", background: "#3b82f615", color: "#3b82f6", borderRadius: 3, border: "1px solid #3b82f630", fontWeight: 700, flexShrink: 0 }}>✓</span>}
                     <button
                       className="node-del"
                       title="Delete node"
                       onClick={e => { e.stopPropagation(); dispatch({ type: "DELETE_NODE", id: node.id }); setSelected(node.id === selected ? null : selected); setSelectedIds(ids => ids.filter(id => id !== node.id)); addLog(`Node deleted: ${def.label}`, "warn"); toast(`"${def.label}" deleted`, "info"); }}
-                      style={{ width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)", borderRadius: 4, color: "#dc2626", cursor: "pointer", fontSize: 13, lineHeight: 1, padding: 0, flexShrink: 0, transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
-                      onMouseEnter={e => { e.currentTarget.style.background = "#dc2626"; e.currentTarget.style.color = "#1e1e1e"; e.currentTarget.style.transform = "scale(1.15)"; }}
+                      style={{ width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)", borderRadius: 4, color: "#dc2626", cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 0, flexShrink: 0, transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "#dc2626"; e.currentTarget.style.color = "var(--panel-bg)"; e.currentTarget.style.transform = "scale(1.15)"; }}
                       onMouseLeave={e => { e.currentTarget.style.background = "rgba(220,38,38,0.08)"; e.currentTarget.style.color = "#dc2626"; e.currentTarget.style.transform = "scale(1)"; }}
                     >×</button>
                   </div>
@@ -1432,8 +1646,8 @@ export default function RobotHMI() {
                   <div style={{ padding: "10px 14px 8px" }}>
                     {def.params && Object.entries(def.params).map(([k, spec]) => (
                       <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0", lineHeight: 1.6 }}>
-                        <span style={{ fontSize: 11, color: "#A0B4BE", fontWeight: 500, flexShrink: 0 }}>{spec.label}</span>
-                        <span style={{ fontSize: 11, color: "#f2f2f2", fontWeight: 600, textAlign: "right", maxWidth: "55%", wordBreak: "break-word" }}>{String(node.params[k] ?? spec.default)}</span>
+                        <span style={{ fontSize: 14, color: "var(--text-soft)", fontWeight: 500, flexShrink: 0 }}>{spec.label}</span>
+                        <span style={{ fontSize: 14, color: "var(--text-main)", fontWeight: 600, textAlign: "right", maxWidth: "55%", wordBreak: "break-word" }}>{String(node.params[k] ?? spec.default)}</span>
                       </div>
                     ))}
                   </div>
@@ -1466,55 +1680,57 @@ export default function RobotHMI() {
           {flow.nodes.length === 0 && (
             <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", textAlign: "center", pointerEvents: "none", userSelect: "none" }}>
               <div style={{ fontSize: 52, marginBottom: 12, opacity: 0.08, filter: "grayscale(1)" }}>⊙</div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: "#7A929C", marginBottom: 6, letterSpacing: "0.02em" }}>Start building your mission</div>
-              <div style={{ fontSize: 11, color: "#7A929C", lineHeight: 1.7 }}>Drag nodes from the left panel<br />Connect outputs to inputs to create logic flows</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: "var(--text-muted)", marginBottom: 6, letterSpacing: "0.02em" }}>Start building your mission</div>
+              <div style={{ fontSize: 14, color: "var(--text-muted)", lineHeight: 1.7 }}>Drag nodes from the left panel<br />Connect outputs to inputs to create logic flows</div>
             </div>
           )}
 
           {/* Zoom controls - bottom center like N8N */}
-          <div className="zoom-controls" style={{ position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 2, background: "#1e1e1e", border: "1px solid #2c2c2c", borderRadius: 8, padding: 3, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+          <div className="zoom-controls" style={{ position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: 2, background: "var(--panel-bg)", border: "1px solid var(--border)", borderRadius: 8, padding: 3, boxShadow: "var(--shadow-subtle)" }}>
             {[["−", () => setZoom(z => Math.max(0.2, z / 1.15))], [`${Math.round(zoom * 100)}%`, () => { setZoom(1); setPan({ x: 0, y: 0 }); }], ["+", () => setZoom(z => Math.min(2.0, z * 1.15))], ["⊡", () => { setZoom(1); setPan({ x: 0, y: 0 }); }]].map(([label, fn]) => (
-              <button key={label} onClick={fn} style={{ width: label === `${Math.round(zoom * 100)}%` ? 44 : 28, height: 28, borderRadius: 6, border: "none", background: "transparent", color: "#A0B4BE", cursor: "pointer", fontSize: label === "⊡" ? 14 : 12, fontFamily: "'Inter', sans-serif", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
-                onMouseEnter={e => { e.currentTarget.style.background = "#262626"; e.currentTarget.style.color = "#f2f2f2"; }}
-                onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#A0B4BE"; }}>
+              <button key={label} onClick={fn} style={{ width: label === `${Math.round(zoom * 100)}%` ? 44 : 28, height: 28, borderRadius: 6, border: "none", background: "transparent", color: "var(--text-soft)", cursor: "pointer", fontSize: 14, fontFamily: "'Inter', sans-serif", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
+                onMouseEnter={e => { e.currentTarget.style.background = "var(--button-hover)"; e.currentTarget.style.color = "var(--text-main)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-soft)"; }}>
                 {label}
               </button>
             ))}
           </div>
 
-          <CanvasMiniMap
-            nodes={flow.nodes}
-            selected={selected}
-            selectedIds={selectedIds}
-            pan={pan}
-            zoom={zoom}
-            canvasSize={canvasSize}
-          />
+          {editorSettings.showMinimap && (
+            <CanvasMiniMap
+              nodes={flow.nodes}
+              selected={selected}
+              selectedIds={selectedIds}
+              pan={pan}
+              zoom={zoom}
+              canvasSize={canvasSize}
+            />
+          )}
 
           {/* Hint bar */}
           <div style={{ position: "absolute", bottom: 56, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 10, pointerEvents: "none" }}>
             {connectionState.isSelectingTarget && (
-              <div style={{ padding: "4px 12px", background: "#1e1e1e", border: "1px solid #3b82f6", borderRadius: 20, fontSize: 11, color: "#3b82f6", fontWeight: 500, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-                Tap a node to connect · ESC to cancel {chainMode && <span style={{ color: "#A0B4BE" }}>· CHAIN ⛓</span>}
+              <div style={{ padding: "4px 12px", background: "var(--panel-bg)", border: "1px solid #3b82f6", borderRadius: 20, fontSize: 14, color: "#3b82f6", fontWeight: 500, boxShadow: "var(--shadow-subtle)" }}>
+                Tap a node to connect · ESC to cancel {chainMode && <span style={{ color: "var(--text-soft)" }}>· CHAIN ⛓</span>}
               </div>
             )}
             {connecting && (
-              <div style={{ padding: "4px 12px", background: "#1e1e1e", border: "1px solid #3b82f6", borderRadius: 20, fontSize: 11, color: "#3b82f6", fontWeight: 500, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+              <div style={{ padding: "4px 12px", background: "var(--panel-bg)", border: "1px solid #3b82f6", borderRadius: 20, fontSize: 14, color: "#3b82f6", fontWeight: 500, boxShadow: "var(--shadow-subtle)" }}>
                 Click an input port to connect · ESC to cancel
               </div>
             )}
             {selectedConn && !connecting && (
-              <div style={{ padding: "4px 12px", background: "#1e1e1e", border: "1px solid #dc2626", borderRadius: 20, fontSize: 11, color: "#dc2626", fontWeight: 500, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+              <div style={{ padding: "4px 12px", background: "var(--panel-bg)", border: "1px solid #dc2626", borderRadius: 20, fontSize: 14, color: "#dc2626", fontWeight: 500, boxShadow: "var(--shadow-subtle)" }}>
                 Connection selected · click × on wire or press Delete to remove
               </div>
             )}
             {selectedIds.length > 1 && !connecting && !selectedConn && (
-              <div style={{ padding: "4px 12px", background: "#1e1e1e", border: "1px solid #3b82f6", borderRadius: 20, fontSize: 11, color: "#A0B4BE", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+              <div style={{ padding: "4px 12px", background: "var(--panel-bg)", border: "1px solid #3b82f6", borderRadius: 20, fontSize: 14, color: "var(--text-soft)", boxShadow: "var(--shadow-subtle)" }}>
                 {selectedIds.length} nodes selected · press Delete to remove
               </div>
             )}
             {selected && selectedIds.length <= 1 && !connecting && !selectedConn && (
-              <div style={{ padding: "4px 12px", background: "#1e1e1e", border: "1px solid #2c2c2c", borderRadius: 20, fontSize: 11, color: "#7A929C", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+              <div style={{ padding: "4px 12px", background: "var(--panel-bg)", border: "1px solid var(--border)", borderRadius: 20, fontSize: 14, color: "var(--text-muted)", boxShadow: "var(--shadow-subtle)" }}>
                 Press Delete to remove node
               </div>
             )}
@@ -1530,15 +1746,15 @@ export default function RobotHMI() {
         {isMobile ? (
           <div className={`right-panel ${mobileRightOpen ? "" : "right-panel-closed"}`} style={{ width: mobileRightOpen ? 300 : 0 }}>
             {/* Mobile close header */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: "1px solid #2c2c2c", flexShrink: 0 }}>
-              <span style={{ fontSize: 10, color: "#7A929C", letterSpacing: "0.08em", fontWeight: 700 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+              <span style={{ fontSize: 14, color: "var(--text-muted)", letterSpacing: "0.08em", fontWeight: 700 }}>
                 {rightTab === "props" ? "NODE PROPERTIES" : rightTab === "ctl" ? "MISSION CONTROL" : "SYSTEM LOG"}
               </span>
-              <button onClick={() => setMobileRightOpen(false)} style={{ background: "none", border: "none", color: "#7A929C", cursor: "pointer", fontSize: 16, padding: "2px 6px" }}>✕</button>
+              <button onClick={() => setMobileRightOpen(false)} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 14, padding: "2px 6px" }}>✕</button>
             </div>
-            <div style={{ display: "flex", borderBottom: "1px solid #2c2c2c", flexShrink: 0 }}>
+            <div style={{ display: "flex", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
               {[["props", "NODE"], ["ctl", "CTL"], ["log", "LOG"]].map(([id, label]) => (
-                <button key={id} onClick={() => setRightTab(id)} style={{ flex: 1, padding: "10px 0", fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", fontFamily: "'Inter', sans-serif", border: "none", background: "transparent", cursor: "pointer", color: rightTab === id ? "#3b82f6" : "#7A929C", borderBottom: `2px solid ${rightTab === id ? "#3b82f6" : "transparent"}`, transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}>
+                <button key={id} onClick={() => setRightTab(id)} style={{ flex: 1, padding: "10px 0", fontSize: 14, fontWeight: 700, letterSpacing: "0.06em", fontFamily: "'Inter', sans-serif", border: "none", background: "transparent", cursor: "pointer", color: rightTab === id ? "#3b82f6" : "var(--text-muted)", borderBottom: `2px solid ${rightTab === id ? "#3b82f6" : "transparent"}`, transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}>
                   {label}
                 </button>
               ))}
@@ -1549,12 +1765,12 @@ export default function RobotHMI() {
           </div>
         ) : (
           <div className="right-panel" style={{ width: rightPanelOpen ? 270 : 0, opacity: rightPanelOpen ? 1 : 0 }}>
-            <div style={{ display: "flex", borderBottom: "1px solid #2c2c2c", flexShrink: 0, visibility: rightPanelOpen ? "visible" : "hidden" }}>
-              <button onClick={() => setRightPanelOpen(false)} style={{ padding: "10px 8px", fontSize: 10, fontWeight: 700, fontFamily: "'Inter', sans-serif", border: "none", background: "transparent", cursor: "pointer", color: "#7A929C", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
-                onMouseEnter={e => { e.currentTarget.style.color = "#f2f2f2"; }}
-                onMouseLeave={e => { e.currentTarget.style.color = "#7A929C"; }}>⟩</button>
+            <div style={{ display: "flex", borderBottom: "1px solid var(--border)", flexShrink: 0, visibility: rightPanelOpen ? "visible" : "hidden" }}>
+              <button onClick={() => setRightPanelOpen(false)} style={{ padding: "10px 8px", fontSize: 14, fontWeight: 700, fontFamily: "'Inter', sans-serif", border: "none", background: "transparent", cursor: "pointer", color: "var(--text-muted)", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}
+                onMouseEnter={e => { e.currentTarget.style.color = "var(--text-main)"; }}
+                onMouseLeave={e => { e.currentTarget.style.color = "var(--text-muted)"; }}>⟩</button>
               {[["props", "NODE"], ["ctl", "CTL"], ["log", "LOG"]].map(([id, label]) => (
-                <button key={id} onClick={() => setRightTab(id)} style={{ flex: 1, padding: "10px 0", fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", fontFamily: "'Inter', sans-serif", border: "none", background: "transparent", cursor: "pointer", color: rightTab === id ? "#3b82f6" : "#7A929C", borderBottom: `2px solid ${rightTab === id ? "#3b82f6" : "transparent"}`, transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}>
+                <button key={id} onClick={() => setRightTab(id)} style={{ flex: 1, padding: "10px 0", fontSize: 14, fontWeight: 700, letterSpacing: "0.06em", fontFamily: "'Inter', sans-serif", border: "none", background: "transparent", cursor: "pointer", color: rightTab === id ? "#3b82f6" : "var(--text-muted)", borderBottom: `2px solid ${rightTab === id ? "#3b82f6" : "transparent"}`, transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}>
                   {label}
                 </button>
               ))}
@@ -1568,7 +1784,7 @@ export default function RobotHMI() {
       {/* ── TOASTS ── */}
       <div style={{ position: "fixed", top: 62, right: 16, zIndex: 999, display: "flex", flexDirection: "column", gap: 6, pointerEvents: "none" }}>
         {toasts.map(t => (
-          <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "#1e1e1e", border: `1px solid ${t.type === "success" ? "#10b981" : t.type === "error" ? "#dc2626" : "#3b82f6"}`, borderRadius: 6, fontSize: 11, color: "#f2f2f2", boxShadow: "0 4px 12px rgba(0,0,0,0.08)", animation: "slideIn 0.2s ease" }}>
+          <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "var(--panel-bg)", border: `1px solid ${t.type === "success" ? "#10b981" : t.type === "error" ? "#dc2626" : "#3b82f6"}`, borderRadius: 6, fontSize: 14, color: "var(--text-main)", boxShadow: "var(--shadow-raised)", animation: "slideIn 0.2s ease" }}>
             <span style={{ color: t.type === "success" ? "#10b981" : t.type === "error" ? "#dc2626" : "#3b82f6" }}>{t.type === "success" ? "✓" : t.type === "error" ? "✕" : "ℹ"}</span>
             {t.msg}
           </div>
@@ -1576,6 +1792,21 @@ export default function RobotHMI() {
       </div>
 
       </div>
+
+      {settingsOpen && (
+        <SettingsPanel
+          settings={editorSettings}
+          resolvedTheme={resolvedTheme}
+          onChange={updateEditorSetting}
+          onClose={() => setSettingsOpen(false)}
+          onReset={() => setEditorSettings(DEFAULT_EDITOR_SETTINGS)}
+          onSave={() => {
+            setSettingsOpen(false);
+            toast("Editor preferences saved", "success");
+          }}
+          onSignOut={() => setIsLoggedIn(false)}
+        />
+      )}
 
       {/* Deploy Modal */}
       {deployModalOpen && (
@@ -1591,13 +1822,13 @@ export default function RobotHMI() {
 }
 
 function TopBtn({ children, onClick, disabled, accent, title }) {
-  const disabledColor = accent || "#6f8088";
-  const color = disabled ? disabledColor : accent || "#A0B4BE";
+  const disabledColor = accent || "var(--text-soft)";
+  const color = disabled ? disabledColor : accent || "var(--text-soft)";
   const disabledBackground = disabled && accent ? `${accent}16` : "transparent";
   return (
     <button onClick={onClick} disabled={disabled} title={title}
-      style={{ padding: "5px 12px", borderRadius: 6, border: disabled && accent ? `1px solid ${accent}30` : "none", background: disabledBackground, color, cursor: disabled ? "not-allowed" : "pointer", fontSize: 11, fontFamily: "'Inter', sans-serif", fontWeight: 600, letterSpacing: "0.02em", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)", opacity: disabled ? 0.72 : 1 }}
-      onMouseEnter={e => { if (!disabled) { e.currentTarget.style.background = "#262626"; e.currentTarget.style.color = accent || "#f2f2f2"; } }}
+      style={{ padding: "5px 12px", borderRadius: 6, border: disabled && accent ? `1px solid ${accent}30` : "none", background: disabledBackground, color, cursor: disabled ? "not-allowed" : "pointer", fontSize: 14, fontFamily: "'Inter', sans-serif", fontWeight: 600, letterSpacing: "0.02em", whiteSpace: "nowrap", transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)", opacity: disabled ? 0.72 : 1 }}
+      onMouseEnter={e => { if (!disabled) { e.currentTarget.style.background = "var(--button-hover)"; e.currentTarget.style.color = accent || "var(--text-main)"; } }}
       onMouseLeave={e => { e.currentTarget.style.background = disabledBackground; e.currentTarget.style.color = color; }}>
       {children}
     </button>
@@ -1607,9 +1838,133 @@ function TopBtn({ children, onClick, disabled, accent, title }) {
 function Section({ title, children }) {
   return (
     <div style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 9, letterSpacing: "0.08em", color: "#A0B4BE", fontWeight: 700, marginBottom: 8, textTransform: "uppercase" }}>{title}</div>
+      <div style={{ fontSize: 14, letterSpacing: "0.08em", color: "var(--text-soft)", fontWeight: 700, marginBottom: 8, textTransform: "uppercase" }}>{title}</div>
       {children}
     </div>
+  );
+}
+
+function ThemeModeSelector({ value, resolvedTheme, onChange, compact = false }) {
+  return (
+    <div className={`theme-mode-selector ${compact ? "theme-mode-selector-compact" : ""}`} role="group" aria-label="Theme mode">
+      {Object.entries(THEME_MODES).map(([key, mode]) => (
+        <button
+          key={key}
+          className={value === key ? "theme-mode-active" : ""}
+          type="button"
+          title={`${mode.label}${key === "system" ? ` (${resolvedTheme})` : ""}`}
+          aria-pressed={value === key}
+          onClick={() => onChange(key)}
+        >
+          <span aria-hidden="true">{mode.icon}</span>
+          {!compact && <span>{mode.label}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SettingsPanel({ settings, resolvedTheme, onChange, onClose, onReset, onSave, onSignOut }) {
+  const [activeSection, setActiveSection] = useState("appearance");
+
+  return (
+    <div className="settings-backdrop" role="dialog" aria-modal="true" aria-labelledby="editor-settings-title" onMouseDown={onClose}>
+      <div className="settings-panel" onMouseDown={event => event.stopPropagation()}>
+        <aside className="settings-nav">
+          <div className="settings-nav-title">Settings</div>
+          <button className={`settings-nav-item ${activeSection === "appearance" ? "settings-nav-item-active" : ""}`} type="button" onClick={() => setActiveSection("appearance")}>appearance</button>
+          <button className={`settings-nav-item ${activeSection === "workspace" ? "settings-nav-item-active" : ""}`} type="button" onClick={() => setActiveSection("workspace")}>workspace</button>
+          <button className="settings-nav-item" type="button" onClick={onSignOut}>sign out</button>
+        </aside>
+
+        <section className="settings-content">
+          <div className="settings-heading-row">
+            <div>
+              <div className="settings-eyebrow">User Settings</div>
+              <h2 id="editor-settings-title">Settings</h2>
+              <p>Editor theme and workspace preferences</p>
+            </div>
+            <button className="settings-back-button" type="button" onClick={onClose}>← Back</button>
+          </div>
+
+          {activeSection === "appearance" ? (
+            <>
+              <div className="settings-card">
+                <div className="settings-card-title">Theme mode</div>
+                <p className="settings-card-description">
+                  Choose the interface theme for the editor shell. System follows your device preference while keeping the workarea grid and canvas tone visible.
+                </p>
+                <ThemeModeSelector
+                  value={settings.themeMode}
+                  resolvedTheme={resolvedTheme}
+                  onChange={value => onChange("themeMode", value)}
+                />
+              </div>
+
+              <div className="settings-card">
+                <div className="settings-card-title">Canvas tone</div>
+                <div className="settings-segmented">
+                  {Object.entries(resolvedTheme === "light" ? LIGHT_CANVAS_TONES : CANVAS_TONES).map(([key, tone]) => (
+                    <button
+                      key={key}
+                      className={settings.canvasTone === key ? "settings-segment-active" : ""}
+                      type="button"
+                      onClick={() => onChange("canvasTone", key)}
+                    >
+                      {tone.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="settings-card">
+                <div className="settings-card-title">Grid density</div>
+                <div className="settings-segmented">
+                  {Object.entries(GRID_DENSITIES).map(([key, density]) => (
+                    <button
+                      key={key}
+                      className={settings.gridDensity === key ? "settings-segment-active" : ""}
+                      type="button"
+                      onClick={() => onChange("gridDensity", key)}
+                    >
+                      {density.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="settings-card">
+                <div className="settings-card-title">Display</div>
+                <SettingToggle label="show grid" checked={settings.showGrid} onChange={value => onChange("showGrid", value)} />
+                <SettingToggle label="minimap" checked={settings.showMinimap} onChange={value => onChange("showMinimap", value)} />
+              </div>
+            </>
+          ) : (
+            <div className="settings-card">
+              <div className="settings-card-title">Workspace</div>
+              <SettingToggle label="compact block sidebar" checked={settings.compactPalette} onChange={value => onChange("compactPalette", value)} />
+              <SettingToggle label="sidebar and node animations" checked={settings.animations} onChange={value => onChange("animations", value)} />
+              <SettingToggle label="node glow" checked={settings.nodeGlow} onChange={value => onChange("nodeGlow", value)} />
+            </div>
+          )}
+
+          <div className="settings-actions">
+            <button className="settings-reset-button" type="button" onClick={onReset}>Reset defaults</button>
+            <button className="settings-save-button" type="button" onClick={onSave}>▣ Save preferences</button>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function SettingToggle({ label, checked, onChange }) {
+  return (
+    <label className="settings-toggle-row">
+      <span>{label}</span>
+      <input type="checkbox" checked={checked} onChange={event => onChange(event.target.checked)} />
+      <span className="settings-toggle" aria-hidden="true" />
+    </label>
   );
 }
 
@@ -1725,7 +2080,7 @@ function CanvasMiniMap({ nodes, selected, selectedIds = [], pan, zoom, canvasSiz
   };
   const visibleNodes = nodes.filter(node =>
     rectsIntersect(
-      { x: node.x, y: node.y, width: NODE_W, height: NODE_H },
+      getNodePlacementRect(node),
       viewport,
     )
   );
@@ -1752,10 +2107,10 @@ function CanvasMiniMap({ nodes, selected, selectedIds = [], pan, zoom, canvasSiz
   return (
     <div className="canvas-minimap" aria-hidden="true">
       <svg viewBox={`0 0 ${width} ${height}`} width={width} height={height}>
-        <rect x="0" y="0" width={width} height={height} rx="12" fill="rgba(7,10,14,0.92)" />
+        <rect x="0" y="0" width={width} height={height} rx="12" fill="var(--panel-bg)" />
         {visibleNodes.map(node => {
           const def = getNodeDef(node.type);
-          const rect = mapRect({ x: node.x, y: node.y, width: NODE_W, height: NODE_H });
+          const rect = mapRect(getNodePlacementRect(node));
           return (
             <rect
               key={node.id}
