@@ -66,6 +66,29 @@ test("signup refuses a second account once the install is claimed", async () => 
   }
 });
 
+// Until the forms were wired to the daemon, handleSubmit always resolved and
+// called onLogin(), so `loading` never went back to false and the failure
+// branch had never once run. It renders an error and flips the submit button
+// out of its spinner — both untested until now.
+test("a rejected login reports the reason and leaves the page working", async () => {
+  const { app, page } = await launchUnclaimed();
+  const crashes = [];
+  page.on("pageerror", (err) => crashes.push(err.message.split("\n")[0]));
+
+  try {
+    await page.getByPlaceholder("you@company.com").fill("nobody@corelyn.test");
+    await page.getByPlaceholder("Enter your password").fill("wrong-password");
+    await page.getByRole("button", { name: "Sign In" }).click();
+
+    await expect(page.getByText(/invalid email or password/i)).toBeVisible();
+    // The button must come back, not stay stuck mid-spinner.
+    await expect(page.getByRole("button", { name: "Sign In" })).toBeEnabled();
+    expect(crashes, "uncaught errors in the renderer").toEqual([]);
+  } finally {
+    await app.close();
+  }
+});
+
 test("a deploy made while signed in is attributable in the audit log", async () => {
   const { app, page, userDataDir } = await launchApp();
   try {

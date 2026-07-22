@@ -556,15 +556,19 @@ export default function SignupPage({ onSignup, onSwitchToLogin }) {
                   display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
                   opacity: loading ? 0.7 : 1,
                 }}>
-                  {loading ? (
-                    <>
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style={{ animation: "signupOrbit 0.8s linear infinite" }}>
-                        <circle cx="12" cy="12" r="10" stroke="rgba(255,255,255,0.3)" strokeWidth="2.5" fill="none" />
-                        <path d="M12 2A10 10 0 0 1 22 12" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" fill="none" />
-                      </svg>
-                      Creating account…
-                    </>
-                  ) : "Create Account"}
+                  {/* Structurally stable across the loading flip: the label is
+                      always a text node and only the spinner appears and
+                      disappears. Toggling between a fragment of two children
+                      and a bare string gave React Fast Refresh a tree it could
+                      not reconcile, and removing the spinner threw
+                      NotFoundError: removeChild. */}
+                  {loading && (
+                    <svg key="spinner" width="18" height="18" viewBox="0 0 24 24" fill="none" style={{ animation: "signupOrbit 0.8s linear infinite" }}>
+                      <circle cx="12" cy="12" r="10" stroke="rgba(255,255,255,0.3)" strokeWidth="2.5" fill="none" />
+                      <path d="M12 2A10 10 0 0 1 22 12" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" fill="none" />
+                    </svg>
+                  )}
+                  {loading ? "Creating account…" : "Create Account"}
                 </span>
               </button>
             </form>
