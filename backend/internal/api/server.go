@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sync"
 
+	"corelynstudio/backend/internal/auth"
 	"corelynstudio/backend/internal/nodes"
 	"corelynstudio/backend/internal/rosbridge"
 	"corelynstudio/backend/internal/store"
@@ -34,6 +35,7 @@ type Server struct {
 	deps Deps
 	mux  *http.ServeMux
 	hub  *hub
+	auth *auth.Auth
 
 	mu       sync.Mutex
 	active   *activeRun // nil when no mission is currently deployed
@@ -52,12 +54,15 @@ type activeRun struct {
 // New builds a Server. Routing uses the stdlib ServeMux method matching
 // added in Go 1.22 — no router dependency needed for three routes.
 func New(deps Deps) *Server {
-	s := &Server{deps: deps, hub: newHub()}
+	s := &Server{deps: deps, hub: newHub(), auth: auth.New(deps.Store)}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("POST /api/deploy", s.handleDeploy)
 	mux.HandleFunc("/ws/mission/status", s.handleStatusWS)
+	mux.HandleFunc("POST /api/auth/login", s.handleLogin)
+	mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
+	mux.HandleFunc("GET /api/auth/session", s.handleSession)
 	s.mux = mux
 
 	if deps.Ros != nil {

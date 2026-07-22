@@ -92,3 +92,81 @@ func (s *Store) EndMissionRun(runID int64, result string) error {
 	}
 	return nil
 }
+
+// CreateUser inserts a user with an already-hashed password and returns its id.
+func (s *Store) CreateUser(email, passwordHash, role string) (int64, error) {
+	res, err := s.db.Exec(
+		`INSERT INTO users (email, password_hash, role, created_at) VALUES (?, ?, ?, ?)`,
+		email, passwordHash, role, nowRFC3339(),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("create user %q: %w", email, err)
+	}
+	return res.LastInsertId()
+}
+
+// UserByEmail returns the id, password hash, and role for email.
+func (s *Store) UserByEmail(email string) (id int64, passwordHash, role string, err error) {
+	err = s.db.QueryRow(
+		`SELECT id, password_hash, role FROM users WHERE email = ?`, email,
+	).Scan(&id, &passwordHash, &role)
+	if err != nil {
+		return 0, "", "", fmt.Errorf("lookup user %q: %w", email, err)
+	}
+	return id, passwordHash, role, nil
+}
+
+// CreateSession inserts a new session row.
+func (s *Store) CreateSession(token string, userID int64, expiresAt time.Time) error {
+	_, err := s.db.Exec(
+		`INSERT INTO sessions (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)`,
+		token, userID, expiresAt.UTC().Format(time.RFC3339), nowRFC3339(),
+	)
+	if err != nil {
+		return fmt.Errorf("create session: %w", err)
+	}
+	return nil
+}
+
+// SessionByToken returns the user id and expiry for token.
+func (s *Store) SessionByToken(token string) (userID int64, expiresAt time.Time, err error) {
+	var expStr string
+	err = s.db.QueryRow(
+		`SELECT user_id, expires_at FROM sessions WHERE token = ?`, token,
+	).Scan(&userID, &expStr)
+	if err != nil {
+		return 0, time.Time{}, fmt.Errorf("lookup session: %w", err)
+	}
+	expiresAt, err = time.Parse(time.RFC3339, expStr)
+	if err != nil {
+		return 0, time.Time{}, fmt.Errorf("parse session expiry %q: %w", expStr, err)
+	}
+	return userID, expiresAt, nil
+}
+
+// DeleteSession removes a session row. Deleting a token that doesn't exist is
+// not an error — logout is idempotent, same as cancelActive for deploys.
+func (s *Store) DeleteSession(token string) error {
+	_, err := s.db.Exec(`DELETE FROM sessions WHERE token = ?`, token)
+	if err != nil {
+		return fmt.Errorf("delete session: %w", err)
+	}
+	return nil
+}
+
+// InsertAuditLog appends one audit_log row. userID is nil for actions with no
+// identified actor, e.g. a failed login against an unknown email.
+func (s *Store) InsertAuditLog(userID *int64, action, target string) error {
+	var uid any
+	if userID != nil {
+		uid = *userID
+	}
+	_, err := s.db.Exec(
+		`INSERT INTO audit_log (user_id, action, target, at) VALUES (?, ?, ?, ?)`,
+		uid, action, target, nowRFC3339(),
+	)
+	if err != nil {
+		return fmt.Errorf("insert audit log: %w", err)
+	}
+	return nil
+}
