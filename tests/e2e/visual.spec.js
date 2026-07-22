@@ -23,6 +23,14 @@ test.describe("visual baseline", () => {
   async function open() {
     const launched = await launchApp(undefined, { deterministic: true });
     app = launched.app;
+    // toHaveScreenshot's own animation handling fast-forwards CSS animations
+    // but leaves the compositing layer they promoted, and text antialiases
+    // differently inside one — the palette's staggered block-rise was worth
+    // ~130 stray pixels a run. Kill animation outright so the comparison sees
+    // the settled layout only.
+    await launched.page.addStyleTag({
+      content: "*, *::before, *::after { animation: none !important; transition: none !important; }",
+    });
     return launched.page;
   }
 
@@ -32,6 +40,11 @@ test.describe("visual baseline", () => {
     // Playwright leaves the pointer wherever it last clicked, and the palette
     // and buttons all have hover styles — park it off every control first.
     await page.mouse.move(0, 0);
+    // Re-check the viewport here, not just at launch: the window has been seen
+    // to drift off the size it was given, and a shot taken at the wrong width
+    // fails as a layout change rather than as the resize it actually is.
+    await expect.poll(() => page.evaluate(() => `${innerWidth}x${innerHeight}`))
+      .toBe("1440x872");
     await expect(page.locator(".toast-stack > div")).toHaveCount(0);
     // The inspector's node id still moves run to run: something in startup
     // draws from Math.random a variable number of times before the node is
