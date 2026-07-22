@@ -662,9 +662,14 @@ export default function RobotHMI() {
     addLog("▶ Deploying mission to robot...", "success");
     toast("Deploying mission to robot...", "info");
     try {
-      await api.deploy(spec);
-      addLog("✓ Mission deployed — robot executing", "success");
-      toast("Robot executing mission", "success");
+      const res = await api.deploy(spec);
+      if (res?.status === "deployed_no_robot") {
+        addLog("Deploy accepted but no robot is connected — mission will not run.", "warn");
+        setMissionRunning(false);
+      } else {
+        addLog("✓ Mission deployed — robot executing", "success");
+        toast("Robot executing mission", "success");
+      }
     } catch (err) {
       addLog(`✗ Deploy failed: ${err.message}`, "error");
       toast(`Deploy failed: ${err.message}`, "error");
